@@ -2,7 +2,7 @@
 
 Your own Omarchy-native UI for movies, TV shows and anime — no terminal needed.
 
-Where the old version just launched a third-party TUI, **OmaMovie 1.1 is a
+Where the old version just launched a third-party TUI, **OmaMovie 1.2 is a
 custom Quickshell panel** (search, poster grid, details, season/episode
 picker, stream picker, subtitles) that plays in `mpv`. All fetching is done
 by a small Rust bridge that links the
@@ -26,8 +26,10 @@ omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 
 That single command clones the plugin, enables its bar widget, downloads the
 matching prebuilt bridge, verifies `SHA256SUMS`, and stores it privately under
-`~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. Click the bar icon after
-the brief first-run download finishes.
+`~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. The shell reloads the
+widget automatically as soon as the bridge lands. Click the bar icon; if you
+click during the brief first-run download, the panel opens by itself once
+installation completes.
 
 Click the **video camera** icon in the bar: search, pick a title, choose a
 stream (resolution / codec / size), Play. Series get a season + episode

@@ -298,10 +298,20 @@ Panel {
     }
     ListModel { id: suggestionModel }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 14
-        spacing: 10
+    KeyboardPanel {
+        id: panel
+        anchorItem: root.anchorItem
+        owner: root.barIdentity
+        bar: root.bar
+        open: root.opened
+        centerOnBar: true
+        contentWidth: panel.fittedContentWidth(820)
+        contentHeight: panel.fittedContentHeight(560)
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 10
 
         // header
         RowLayout {
@@ -640,5 +650,6 @@ Panel {
                 }
             }
         }
+    }
     }
 }

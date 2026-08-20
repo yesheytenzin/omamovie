@@ -32,10 +32,6 @@ fn str_arg(req: &Value, key: &str) -> String {
     req.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
 }
 
-fn int_arg(req: &Value, key: &str) -> i64 {
-    req.get(key).and_then(|v| v.as_i64()).unwrap_or(0)
-}
-
 fn usz_arg(req: &Value, key: &str, default: usize) -> usize {
     req.get(key)
         .and_then(|v| v.as_u64())

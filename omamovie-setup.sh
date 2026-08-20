@@ -7,6 +7,7 @@ INSTALL_DIR="${INSTALL_DIR:-$DIR/.runtime}"
 BIN="omamovie-bridge"
 VERSION="$(jq -er '.version' "$DIR/manifest.json")"
 VERSION_FILE="$INSTALL_DIR/version"
+REVISION_FILE="$INSTALL_DIR/plugin-revision"
 RELEASE_BASE="${OMAMOVIE_RELEASE_BASE:-https://github.com/yesheytenzin/omamovie/releases/download/v$VERSION}"
 
 say()  { printf '\033[1;36m[omamovie]\033[0m %s\n' "$*"; }
@@ -24,8 +25,19 @@ esac
 
 mkdir -p "$INSTALL_DIR"
 
+record_plugin_revision() {
+  local revision
+  revision="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || printf '%s' "$VERSION")"
+  if [[ ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
+    printf '%s\n' "$revision" >"$REVISION_FILE.new"
+    mv -f "$REVISION_FILE.new" "$REVISION_FILE"
+    printf 'OMAMOVIE_RESTART_SHELL=1\n'
+  fi
+}
+
 if [[ -x "$INSTALL_DIR/$BIN" && -f "$VERSION_FILE" && $(<"$VERSION_FILE") == "$VERSION" ]]; then
   say "bridge $VERSION is already installed"
+  record_plugin_revision
   exit 0
 fi
 
@@ -48,7 +60,8 @@ mv -f "$VERSION_FILE.new" "$VERSION_FILE"
 say "installed $INSTALL_DIR/$BIN"
 
 if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then
-  say "bridge OK - reload the plugin (omarchy-shell shell rescanPlugins) and click its bar icon"
+  say "bridge OK"
 else
   warn "bridge installed but did not respond to ping"
 fi
+record_plugin_revision

@@ -1,8 +1,10 @@
 # Omarchy OmaMovie
 
+> **Credit:** Powered by [MovieBox-TUI](https://github.com/mesamirh/MovieBox-Tui) by [mesamirh](https://github.com/mesamirh) — all fetching via its engine, no scraping in this plugin.
+
 Your own Omarchy-native UI for movies, TV shows and anime — no terminal needed.
 
-Where the old version just launched a third-party TUI, **OmaMovie 1.2 is a
+Where the old version just launched a third-party TUI, **OmaMovie 1.5 is a
 custom Quickshell panel** (search, poster grid, details, season/episode
 picker, stream picker, subtitles) that plays in `mpv`. All fetching is done
 by a small Rust bridge that links the
@@ -31,7 +33,7 @@ restarts automatically as soon as installation finishes. Click the bar icon;
 if you click during the brief first-run download, the panel opens by itself
 once installation completes.
 
-Click the **video camera** icon in the bar: search, pick a title, choose a
+Click the **movie** icon in the bar (󰨂): search, pick a title, choose a
 stream (resolution / codec / size), Play. Series get a season + episode
 picker; subtitles are downloaded automatically when available.
 

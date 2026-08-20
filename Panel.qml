@@ -307,10 +307,19 @@ Panel {
         root.selStream = i;
     }
 
+    Process {
+        id: prefetchProc
+        property string collected: ""
+        stdout: SplitParser { onRead: function(data){ prefetchProc.collected += data } }
+        onExited: function(code){ try{ JSON.parse(prefetchProc.collected);}catch(e){} }
+    }
+
     function prefetchDetails(id) {
-        if (!id || bridgeProc.running || root.pending.length > 0) return;
-        // fire-and-forget, will populate cache for instant click
-        request("details", { id: id }, function(resp){});
+        if (!id || bridgeProc.running || root.pending.length > 0 || prefetchProc.running) return;
+        var req = JSON.stringify({ cmd: "details", id: id });
+        prefetchProc.collected = "";
+        prefetchProc.command = [root.bridge, req];
+        prefetchProc.running = true;
     }
 
     function play() {
@@ -460,6 +469,17 @@ Panel {
             if (root.opened) searchField.forceActiveFocus();
         });
     }
+    onPlayerFullscreenChanged: {
+        if (root.view !== "player" || !embeddedPlayer.source) return;
+        var wasPlaying = embeddedPlayer.playbackState === MediaPlayer.PlayingState;
+        var pos = embeddedPlayer.position;
+        Qt.callLater(function() {
+            embeddedPlayer.position = pos;
+            if (wasPlaying) embeddedPlayer.play();
+            else embeddedPlayer.pause();
+        });
+    }
+
     function close() {
         if (root.view === "player") { root.stopEmbedded(); root.playerFullscreen = false; }
         root.controller.hide();
@@ -672,6 +692,11 @@ Panel {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
+                        cacheBuffer: 400
+                        flickableDirection: Flickable.VerticalFlick
+                        boundsBehavior: Flickable.StopAtBounds
+                        maximumFlickVelocity: 4000
+                        reuseItems: true
                         visible: !root.homeLoading
                         model: homeModel
                         cellWidth: 168
@@ -782,6 +807,11 @@ Panel {
                 visible: root.view === "grid"
                 model: resultModel
                 clip: true
+                cacheBuffer: 400
+                flickableDirection: Flickable.VerticalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                maximumFlickVelocity: 4000
+                reuseItems: true
                 cellWidth: 168
                 cellHeight: 236
                 delegate: Item {
@@ -1015,6 +1045,10 @@ Panel {
                             Layout.fillHeight: true
                             clip: true
                             spacing: 4
+                            cacheBuffer: 200
+                            boundsBehavior: Flickable.StopAtBounds
+                            maximumFlickVelocity: 3500
+                            reuseItems: true
                             model: root.streams
                             delegate: Button {
                                 width: parent ? parent.width : 0
@@ -1109,6 +1143,7 @@ Panel {
                             id: embeddedVideoOutput
                             anchors.fill: parent
                             fillMode: VideoOutput.PreserveAspectFit
+                            smooth: true
                         }
                         Text {
                             anchors.centerIn: parent
@@ -1190,6 +1225,7 @@ Panel {
             id: fullscreenVideoOutput
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectFit
+            smooth: true
         }
 
         Rectangle {

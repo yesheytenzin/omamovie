@@ -32,10 +32,10 @@ record_plugin_revision() {
   if [[ $force == 1 || ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
     printf '%s\n' "$revision" >"$REVISION_FILE.new"
     mv -f "$REVISION_FILE.new" "$REVISION_FILE"
-    if systemd-run --user --collect --quiet /usr/share/omarchy/bin/omarchy-restart-shell; then
+    if systemd-run --user --collect --quiet omarchy-shell shell rescanPlugins; then
       printf 'OMAMOVIE_RESTART_SHELL=1\n'
     else
-      warn "could not schedule Omarchy shell restart"
+      warn "could not schedule plugin rescan (omarchy-shell shell rescanPlugins)"
     fi
   fi
 }

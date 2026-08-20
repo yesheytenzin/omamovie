@@ -1077,6 +1077,7 @@ Panel {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
+                            Layout.bottomMargin: 10
                             Text {
                                 Layout.fillWidth: true
                                 text: root.statusText
@@ -1092,6 +1093,7 @@ Panel {
                                 onClicked: { root.playExternal(); root.close(); }
                             }
                         }
+                        Item { Layout.preferredHeight: 4 }
                     }
                 }
             }

@@ -117,7 +117,7 @@ BarWidget {
             }
             var restartScheduled = out.indexOf("OMAMOVIE_RESTART_SHELL=1") !== -1;
             if (restartScheduled) {
-                // The setup script scheduled a detached full-shell restart.
+                // The setup script scheduled a detached rescan (omarchy-shell shell rescanPlugins).
                 // Its replacement widget picks up any pending-open marker.
                 return;
             }

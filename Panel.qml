@@ -687,13 +687,6 @@ Panel {
                             font.bold: true
                             color: Color.accent
                         }
-                        Button {
-                            text: "\u21bb"
-                            tooltipText: "Refresh"
-                            fontSize: Style.font.caption
-                            enabled: !root.homeLoading
-                            onClicked: root.loadHome(true)
-                        }
                     }
                     GridView {
                         id: homeGrid

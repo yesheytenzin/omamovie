@@ -26,23 +26,21 @@ esac
 mkdir -p "$INSTALL_DIR"
 
 record_plugin_revision() {
-  local force="${1:-0}" revision
+  local revision
   revision="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || printf '%s' "$VERSION")"
   mkdir -p "$(dirname "$REVISION_FILE")"
-  if [[ $force == 1 || ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
+  if [[ ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
     printf '%s\n' "$revision" >"$REVISION_FILE.new"
     mv -f "$REVISION_FILE.new" "$REVISION_FILE"
-    if systemd-run --user --collect --quiet omarchy-shell shell rescanPlugins; then
-      printf 'OMAMOVIE_RESTART_SHELL=1\n'
-    else
-      warn "could not schedule plugin rescan (omarchy-shell shell rescanPlugins)"
-    fi
   fi
 }
+
+# No explicit rescan - rely on omarchy plugin manager's rescan and file watcher (single reload)
 
 if [[ -x "$INSTALL_DIR/$BIN" && -f "$VERSION_FILE" && $(<"$VERSION_FILE") == "$VERSION" ]]; then
   say "bridge $VERSION is already installed"
   record_plugin_revision
+  # No rescan here - omarchy plugin add/update already did one, and file watcher will handle .runtime changes
   exit 0
 fi
 
@@ -69,4 +67,4 @@ if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then
 else
   warn "bridge installed but did not respond to ping"
 fi
-record_plugin_revision 1
+record_plugin_revision

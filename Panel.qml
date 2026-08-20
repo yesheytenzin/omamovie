@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import QtMultimedia
 import qs.Commons
 import qs.Ui
@@ -162,11 +163,34 @@ Panel {
         var it = resultModel.get(idx);
         root.currentId = it.id;
         root.currentTitle = it.title;
+        // optimistic — switch immediately for snappy feel
+        root.details = null;
+        root.seasons = [];
+        root.streams = [];
+        root.selStream = -1;
+        root.subs = [];
+        detailPoster.source = it.cover || "";
+        root.view = "details";
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
         root.busyLabel = "Loading details \u2026";
         root.detailGen++;
         var gen = root.detailGen;
+        // parallel streams for movie guess (will be overwritten if series)
+        root.resourceGen++;
+        var resGen = root.resourceGen;
+        request("resources", { id: it.id, season: 0, episode: 0, perPage: 20 }, function(resp){
+            if (resGen !== root.resourceGen) return;
+            // only use if still movie-like (no seasons yet) and view still details for same id
+            if (gen !== root.detailGen) return;
+            if (root.currentId !== it.id) return;
+            if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
+                root.streams = resp.items;
+                root.selStream = 0;
+                root.statusText = "Pick a stream and press Play";
+                root.busy = false;
+            }
+        });
         request("details", { id: it.id }, function(resp, code) {
             if (gen !== root.detailGen) return;
             root.busy = false;
@@ -180,31 +204,58 @@ Panel {
             root.curSeason = 1;
             root.maxEp = root.episodeCount(1);
             root.curEp = root.isSeries ? 1 : 0;
-            root.streams = [];
-            root.selStream = -1;
-            root.subs = [];
-            root.view = "details";
-            root.statusText = root.isSeries ? "Pick a season and episode" : "Pick a stream and press Play";
-
+            // if we already have streams for movie and this is series, reload correct episode
+            if (root.isSeries) {
+                root.streams = [];
+                root.selStream = -1;
+                root.subs = [];
+                root.statusText = "Pick a season and episode";
+                root.loadStreams(root.curSeason, root.curEp);
+            } else {
+                // movie: if parallel streams already arrived, keep them; otherwise load
+                if (root.streams.length === 0) {
+                    root.streams = [];
+                    root.selStream = -1;
+                    root.subs = [];
+                    root.statusText = "Pick a stream and press Play";
+                    root.loadStreams(0, 0);
+                }
+            }
             var cover = root.coverUrlOf(root.details);
-            detailPoster.source = cover || "";
-
-            if (root.isSeries) root.loadStreams(root.curSeason, root.curEp);
-            else root.loadStreams(0, 0);
+            if (cover) detailPoster.source = cover;
         });
     }
 
     function openHomeDetails(idx) {
         if (idx < 0 || idx >= homeModel.count) return;
         var it = homeModel.get(idx);
-        // reuse search result path: push to resultModel temporarily
         root.currentId = it.id;
         root.currentTitle = it.title;
+        root.details = null;
+        root.seasons = [];
+        root.streams = [];
+        root.selStream = -1;
+        root.subs = [];
+        detailPoster.source = it.cover || "";
+        root.view = "details";
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
         root.busyLabel = "Loading details \u2026";
         root.detailGen++;
         var gen = root.detailGen;
+        root.resourceGen++;
+        var resGen = root.resourceGen;
+        request("resources", { id: it.id, season: 0, episode: 0, perPage: 20 }, function(resp){
+            if (resGen !== root.resourceGen) return;
+            if (gen !== root.detailGen) return;
+            if (root.currentId !== it.id) return;
+            if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
+                root.streams = resp.items;
+                root.selStream = 0;
+                root.statusText = "Pick a stream and press Play";
+                root.busy = false;
+            }
+        });
         request("details", { id: it.id }, function(resp, code) {
             if (gen !== root.detailGen) return;
             root.busy = false;
@@ -218,15 +269,23 @@ Panel {
             root.curSeason = 1;
             root.maxEp = root.episodeCount(1);
             root.curEp = root.isSeries ? 1 : 0;
-            root.streams = [];
-            root.selStream = -1;
-            root.subs = [];
-            root.view = "details";
-            root.statusText = root.isSeries ? "Pick a season and episode" : "Pick a stream and press Play";
+            if (root.isSeries) {
+                root.streams = [];
+                root.selStream = -1;
+                root.subs = [];
+                root.statusText = "Pick a season and episode";
+                root.loadStreams(root.curSeason, root.curEp);
+            } else {
+                if (root.streams.length === 0) {
+                    root.streams = [];
+                    root.selStream = -1;
+                    root.subs = [];
+                    root.statusText = "Pick a stream and press Play";
+                    root.loadStreams(0, 0);
+                }
+            }
             var cover = root.coverUrlOf(root.details);
-            detailPoster.source = cover || "";
-            if (root.isSeries) root.loadStreams(root.curSeason, root.curEp);
-            else root.loadStreams(0, 0);
+            if (cover) detailPoster.source = cover;
         });
     }
 
@@ -247,6 +306,12 @@ Panel {
 
     function selectStream(i) {
         root.selStream = i;
+    }
+
+    function prefetchDetails(id) {
+        if (!id || bridgeProc.running || root.pending.length > 0) return;
+        // fire-and-forget, will populate cache for instant click
+        request("details", { id: id }, function(resp){});
     }
 
     function play() {
@@ -324,7 +389,7 @@ Panel {
     MediaPlayer {
         id: embeddedPlayer
         audioOutput: embeddedAudio
-        videoOutput: embeddedVideoOutput
+        videoOutput: root.playerFullscreen ? fullscreenVideoOutput : embeddedVideoOutput
         onErrorOccurred: function(error, errorString) {
             root.statusText = "Playback error: " + errorString;
             root.embeddedPlaying = false;
@@ -442,12 +507,18 @@ Panel {
         bar: root.bar
         open: root.opened
         centerOnBar: true
-        // Responsive: width capped at 1100, height fits content up to 88% screen — no empty space below
+        // Responsive breakpoints: <1366 small 96%/90%, 1366-1920 medium 88%/82% cap 1100, >1920 large 80%/78% cap 1400
+        readonly property bool isSmallScreen: panel.screenW > 0 && panel.screenW < 1366
+        readonly property bool isLargeScreen: panel.screenW >= 1920
         contentWidth: root.playerFullscreen && root.view === "player"
                       ? Math.round(panel.screenW * 0.96)
+                      : isSmallScreen ? panel.fittedContentWidth(panel.screenW * 0.96)
+                      : isLargeScreen ? panel.fittedContentWidth(Math.min(panel.screenW * 0.80, 1400))
                       : panel.fittedContentWidth(Math.min(panel.screenW * 0.88, 1100))
         contentHeight: root.playerFullscreen && root.view === "player"
                        ? panel.cappedContentHeight(panel.screenH * 0.92)
+                       : isSmallScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.90)
+                       : isLargeScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.78)
                        : panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.82)
 
         ColumnLayout {
@@ -668,7 +739,15 @@ Panel {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 hoverEnabled: true
+                                onEntered: homeHoverTimer.restart()
+                                onExited: homeHoverTimer.stop()
                                 onClicked: root.openHomeDetails(index)
+                                Timer {
+                                    id: homeHoverTimer
+                                    interval: 380
+                                    repeat: false
+                                    onTriggered: root.prefetchDetails(model.id)
+                                }
                             }
                         }
                     }
@@ -776,7 +855,15 @@ Panel {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         hoverEnabled: true
+                        onEntered: hoverTimer.restart()
+                        onExited: hoverTimer.stop()
                         onClicked: root.openDetails(index)
+                        Timer {
+                            id: hoverTimer
+                            interval: 380
+                            repeat: false
+                            onTriggered: root.prefetchDetails(model.id)
+                        }
                     }
                 }
             }
@@ -1087,5 +1174,69 @@ Panel {
             }
         }
     }
+
+    // True fullscreen — covers entire screen, true window fullscreen
+    PanelWindow {
+        id: fullscreenWindow
+        visible: root.playerFullscreen && root.view === "player"
+        screen: panel.screen
+        color: "black"
+        anchors { top: true; bottom: true; left: true; right: true }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.namespace: "omamovie-fullscreen"
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+
+        VideoOutput {
+            id: fullscreenVideoOutput
+            anchors.fill: parent
+            fillMode: VideoOutput.PreserveAspectFit
+        }
+
+        // top bar overlay
+        Rectangle {
+            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+            height: 48; color: "#80000000"; visible: fullscreenWindow.visible
+            RowLayout {
+                anchors.fill: parent; anchors.margins: 10; spacing: 10
+                Text { Layout.fillWidth: true; text: root.playerTitle || "Player"; color: "white"; font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight }
+                Button { text: "\u00D7 Exit Full"; fontSize: Style.font.caption; onClicked: root.playerFullscreen = false }
+                Button { text: "X"; fontSize: Style.font.caption; onClicked: root.close() }
+            }
+        }
+
+        // bottom controls overlay
+        Rectangle {
+            anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
+            height: 64; color: "#80000000"; visible: fullscreenWindow.visible
+            RowLayout {
+                anchors.fill: parent; anchors.margins: 10; spacing: 10
+                Button {
+                    text: embeddedPlayer.playbackState === MediaPlayer.PlayingState ? "\u23F8" : "\u25B6"
+                    onClicked: embeddedPlayer.playbackState === MediaPlayer.PlayingState ? embeddedPlayer.pause() : embeddedPlayer.play()
+                }
+                PanelSlider {
+                    Layout.fillWidth: true; bar: root.bar
+                    minimum: 0; maximum: embeddedPlayer.duration > 0 ? embeddedPlayer.duration : 1
+                    value: embeddedPlayer.position; enabled: embeddedPlayer.seekable
+                    onMoved: function(v) { embeddedPlayer.position = v; }
+                }
+                Text {
+                    text: {
+                        function fmt(ms){ if(!ms||ms<0) return "0:00"; var s=Math.floor(ms/1000); var m=Math.floor(s/60); var sec=s%60; return m+":"+(sec<10?"0"+sec:sec); }
+                        return fmt(embeddedPlayer.position)+" / "+fmt(embeddedPlayer.duration);
+                    }
+                    color: "white"; font.family: Style.font.family; font.pixelSize: Style.font.caption - 1
+                }
+                Button { text: "mpv"; onClicked: { root.playerFullscreen = false; root.playExternal(); } }
+            }
+        }
+
+        // click to toggle controls? just close on Esc handled by Panel close
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onDoubleClicked: root.playerFullscreen = false
+        }
     }
 }

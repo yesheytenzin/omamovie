@@ -18,11 +18,13 @@ BarWidget {
     property bool installing: false
     property string bridgeError: ""
     property bool userClickedInstall: false
+    property int downloadProgress: -1
 
     function ensureBridge() {
         if (setupProc.running) return;
         root.installing = true;
         root.bridgeError = "";
+        root.downloadProgress = -1;
         setupProc.setupOutput = "";
         setupProc.command = ["bash", root.setupScript];
         setupProc.running = true;
@@ -90,15 +92,40 @@ BarWidget {
         property string setupOutput: ""
         property string errorOutput: ""
         stdout: SplitParser {
-            onRead: function(data) { setupProc.setupOutput += data + "\n" }
+            onRead: function(data) {
+                setupProc.setupOutput += data + "\n";
+                var m = data.match(/PROGRESS:(\d+)/);
+                if (m) {
+                    var v = parseInt(m[1], 10);
+                    if (!isNaN(v)) root.downloadProgress = v;
+                }
+            }
         }
         stderr: SplitParser {
-            onRead: function(data) { setupProc.errorOutput += data + "\n" }
+            onRead: function(data) {
+                setupProc.errorOutput += data + "\n";
+                // Parse curl progress like " 45.2%" or "PROGRESS:45"
+                var m = data.match(/(\d+)\s*%/);
+                if (m) {
+                    var v = parseInt(m[1], 10);
+                    if (!isNaN(v) && v >= 0 && v <= 100) root.downloadProgress = v;
+                } else {
+                    m = data.match(/PROGRESS:(\d+)/);
+                    if (m) {
+                        var v2 = parseInt(m[1], 10);
+                        if (!isNaN(v2)) root.downloadProgress = v2;
+                    }
+                }
+            }
         }
         onRunningChanged: {
             if (running) {
                 setupProc.setupOutput = "";
                 setupProc.errorOutput = "";
+                root.downloadProgress = 0;
+            } else {
+                // keep 100% briefly then hide
+                if (root.downloadProgress >= 0) Qt.callLater(function(){ root.downloadProgress = -1; });
             }
         }
         onExited: function(exitCode) {
@@ -178,10 +205,25 @@ BarWidget {
         bar: root.bar
         text: ""
         slotSize: Style.bar.statusSlot
-        tooltipText: root.installing ? "OmaMovie \u2022 installing bridge \u2026" :
+        tooltipText: root.installing ? ("OmaMovie \u2022 installing bridge " + (root.downloadProgress >= 0 ? String(root.downloadProgress) : "\u2026")) :
                      (root.bridgeReady ? "OmaMovie \u2022 search, browse and watch movies, shows and anime in mpv" :
                       (root.bridgeError || "OmaMovie \u2022 bridge not installed; click to retry"))
         onPressed: root.togglePanel()
+    }
+
+    // Download progress: plain number overlaid on the icon while installing
+    Text {
+        id: progressCenter
+        visible: root.installing && root.downloadProgress >= 0 && root.downloadProgress < 100
+        anchors.centerIn: button
+        text: String(root.downloadProgress)
+        font.family: Style.font.family
+        font.pixelSize: 10
+        font.bold: true
+        color: Color.accent
+        style: Text.Outline
+        styleColor: Color.background
+        opacity: 0.95
     }
 
     Component.onCompleted: {

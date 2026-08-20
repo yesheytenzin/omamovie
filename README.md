@@ -1,87 +1,105 @@
 # Omarchy OmaMovie
 
-One-click launcher for [MovieBox-TUI](https://github.com/mesamirh/MovieBox-Tui)
-from your Omarchy bar: a lightweight terminal client that searches, streams
-and downloads movies, TV shows, anime and live TV in `mpv`/`VLC` — no browser
-needed.
+Your own Omarchy-native UI for movies, TV shows and anime — no terminal needed.
 
-The plugin is just a launcher + installer. It hosts no content and contains
-no scraping code; all functionality comes from MovieBox-TUI itself.
+Where the old version just launched a third-party TUI, **OmaMovie 1.1 is a
+custom Quickshell panel** (search, poster grid, details, season/episode
+picker, stream picker, subtitles) that plays in `mpv`. All fetching is done
+by a small Rust bridge that links the
+[MovieBox-TUI](https://github.com/mesamirh/MovieBox-Tui) engine as a library
+— the same public engine the upstream project uses; the plugin UI itself
+contains no scraping code.
 
 ## Install
 
-```bash
-omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable --yes
-# or local path while developing
-omarchy plugin add /home/tenzin/plugins/omamovie --enable --yes
-omarchy-shell shell rescanPlugins
-```
-
-The widget appears in the **right** section. Move it:
-
-```bash
-omarchy bar move tenzin.omamovie --section left
-```
-
-First click installs `moviebox-tui` to `~/.local/bin` (official GitHub release,
-checksum-verified when `SHA256SUMS` is published), then opens it. A media
-player is required for playback (`mpv` recommended):
+Prerequisite:
 
 ```bash
 omarchy pkg add mpv
 ```
 
-## Use
+Add the plugin and download the prebuilt bridge:
 
-- Click the **video camera** icon to open MovieBox-TUI in your default terminal
-  (via `xdg-terminal-exec`).
-- Press `?` inside the app for the full key map.
-- The terminal opens with `--app-id=moviebox-tui`, so a Hyprland rule can target
-  it, e.g. in `~/.config/hypr/hyprland.lua`:
+```bash
+omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable --yes
+omarchy-shell shell rescanPlugins
 
-  ```lua
-  o.window("class:moviebox-tui", { size = "60% 70%", float = true })
-  ```
+# downloads the release for your CPU, verifies SHA256, installs to ~/.local/bin
+~/.config/omarchy/plugins/tenzin.omamovie/omamovie-setup.sh
+omarchy-shell shell rescanPlugins
+```
 
-- Change the bar glyph by editing `text` in `BarWidget.qml` (it is a Nerd Font
-  glyph, `\uf03d`).
+Click the **video camera** icon in the bar: search, pick a title, choose a
+stream (resolution / codec / size), Play. Series get a season + episode
+picker; subtitles are downloaded automatically when available.
 
 ## Update
 
 ```bash
-omarchy plugin update tenzin.omamovie --yes   # pull latest plugin code
-# then refresh the moviebox binary itself:
-~/.config/omarchy/plugins/tenzin.omamovie/moviebox-setup.sh
+omarchy plugin update tenzin.omamovie --yes     # pull new plugin code
+~/.config/omarchy/plugins/tenzin.omamovie/omamovie-setup.sh   # download new bridge
 ```
 
-## Uninstall
+## Remove
 
 ```bash
 omarchy plugin remove tenzin.omamovie --yes
-rm -f ~/.local/bin/moviebox-tui   # optional: also drop the binary
+rm -f ~/.local/bin/omamovie-bridge              # optional: drop the bridge
 ```
 
-The bar icon is removed with the plugin; downloads, config and `~/.local/bin`
-are left untouched by the plugin removal itself.
+## How it works
+
+```
+BarWidget.qml ──► opens Panel.qml (Quickshell popup UI)
+                      │
+                      ▼  newline-JSON via CLI
+              omamovie-bridge  (Rust, ~/.local/bin)
+                      │  links moviebox-tui crate (pinned git rev)
+                      ▼  search / suggest / details / resources /
+                         captions / subfile / poster (cached)
+                    mpv ⏴ stream URL (+ subtitles)
+```
+
+The bridge is a stateless one-shot CLI: every panel action spawns it,
+passes a JSON request and reads one JSON line back. Posters are cached in
+`~/.cache/omamovie/posters/`.
+
+### Bridge commands
+
+```bash
+omamovie-bridge '{"cmd":"search","q":"dune","page":1}'
+omamovie-bridge '{"cmd":"details","id":"<subjectId>"}'
+omamovie-bridge '{"cmd":"resources","id":"<id>","season":1,"episode":2}'
+omamovie-bridge '{"cmd":"captions","id":"<id>","rid":"<resourceId>"}'
+omamovie-bridge '{"cmd":"poster","url":"https://..."}'   # cached file path
+omamovie-bridge '{"cmd":"subfile","url":"https://...srt"}' # downloaded path
+```
 
 ## Files
 
 ```
-moviebox-tui/
-  manifest.json        # bar-widget metadata
-  BarWidget.qml        # bar icon; checks for the binary, launches the TUI
-  moviebox-launch.sh   # install-if-missing, then xdg-terminal-exec
-  moviebox-setup.sh    # downloads the official release to ~/.local/bin
-  README.md
-  LICENSE
+omamovie/
+  manifest.json          # bar-widget metadata (id tenzin.omamovie)
+  BarWidget.qml          # bar icon -> panel
+  Panel.qml              # the OmaMovie UI (search/grid/details/play)
+  omamovie-setup.sh      # downloads + verifies the release bridge
+  bridge/
+    Cargo.toml           # pins moviebox-tui (rev 90acb82c)
+    src/main.rs          # JSON bridge over the upstream engine
+  README.md  LICENSE
 ```
+
+Bridge binaries are built once by GitHub Actions for x86_64 and arm64 whenever
+a `v*` tag is pushed. They are stripped, compressed, published with
+`SHA256SUMS`, and reused by every installation; users do not need Rust or the
+large Cargo build directory.
 
 ## Legal note
 
-MovieBox-TUI streams and downloads third-party content. The plugin does not
-host, store, or redistribute anything itself — users are responsible for
-complying with the laws of their country, as per the upstream project's own
-disclaimer.
+OmaMovie itself hosts nothing. All content access goes through the
+MovieBox-TUI engine, which per its own disclaimer streams publicly
+available content — users are responsible for complying with the laws of
+their country.
 
 ## License
 

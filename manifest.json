@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "tenzin.omamovie",
   "name": "OmaMovie",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "tenzin",
-  "description": "Launch MovieBox-TUI \u2014 search, stream and download movies, TV shows, anime and live TV from your terminal \u2014 straight from the Omarchy bar.",
+  "description": "Your own Omarchy-native UI for movies, TV shows and anime \u2014 search, poster grids, stream picker and mpv playback, powered by the MovieBox-TUI engine through a local Rust bridge.",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "OmaMovie",
-    "description": "One-click launch of MovieBox-TUI in your terminal",
+    "description": "Search and watch movies, shows and anime in mpv",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right",

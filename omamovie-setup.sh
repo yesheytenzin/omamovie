@@ -22,6 +22,7 @@ case "$(uname -m)" in
   aarch64|arm64) ARCH="arm64" ;;
   *) fail "unsupported architecture: $(uname -m)" ;;
 esac
+ARCHIVE="OmaMovie_Linux_${ARCH}.tar.gz"
 
 mkdir -p "$INSTALL_DIR"
 

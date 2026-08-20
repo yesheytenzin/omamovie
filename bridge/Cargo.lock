@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "omamovie-bridge"
-version = "1.5.15"
+version = "1.5.16"
 dependencies = [
  "moviebox-tui",
  "serde",

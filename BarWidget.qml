@@ -13,16 +13,24 @@ BarWidget {
 
     readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
     readonly property string setupScript: Qt.resolvedUrl("omamovie-setup.sh").toString().replace(/^file:\/\//, "")
+    readonly property string pendingOpenMarker: Qt.resolvedUrl(".runtime/.pending-open").toString().replace(/^file:\/\//, "")
     property bool bridgeReady: false
     property bool installing: false
     property string bridgeError: ""
+    property bool userClickedInstall: false
 
     function ensureBridge() {
         if (setupProc.running) return;
         root.installing = true;
         root.bridgeError = "";
+        setupProc.setupOutput = "";
         setupProc.command = ["bash", root.setupScript];
         setupProc.running = true;
+    }
+
+    function shellRescan() {
+        rescanProc.command = ["/usr/share/omarchy/bin/omarchy-shell", "shell", "rescanPlugins"];
+        rescanProc.running = true;
     }
 
     function injectPanel() {
@@ -36,11 +44,25 @@ BarWidget {
 
     function togglePanel() {
         if (!root.bridgeReady) {
+            // The bridge is still downloading (or missing): note that the
+            // user wants the panel, and re-open it once installation lands.
+            root.userClickedInstall = true;
+            touchProc.command = ["touch", root.pendingOpenMarker];
+            touchProc.running = true;
             root.ensureBridge();
             return;
         }
         if (panelLoader.item && panelLoader.item.toggle)
             panelLoader.item.toggle();
+    }
+
+    // One-shot: a click may have asked for the panel while the bridge was
+    // installing (possibly across the shell reload we trigger on a fresh
+    // install). If such a marker file exists, open the panel now.
+    function consumePendingOpen() {
+        markerProc.out = "";
+        markerProc.command = ["bash", "-c", "m=\"$1\"; [ -f \"$m\" ] && rm -f \"$m\" && echo OPEN", "_", root.pendingOpenMarker];
+        markerProc.running = true;
     }
     function open() {
         if (panelLoader.item && panelLoader.item.openFromHotkey)
@@ -60,18 +82,65 @@ BarWidget {
 
     Process {
         id: setupProc
+        property string setupOutput: ""
         property string errorOutput: ""
+        stdout: SplitParser {
+            onRead: function(data) { setupProc.setupOutput += data + "\n" }
+        }
         stderr: SplitParser {
             onRead: function(data) { setupProc.errorOutput += data + "\n" }
         }
         onRunningChanged: {
-            if (running) setupProc.errorOutput = "";
+            if (running) {
+                setupProc.setupOutput = "";
+                setupProc.errorOutput = "";
+            }
         }
         onExited: function(exitCode) {
             root.installing = false;
             root.bridgeReady = exitCode === 0;
-            if (!root.bridgeReady)
+            if (!root.bridgeReady) {
                 root.bridgeError = setupProc.errorOutput.trim() || "Bridge installation failed";
+                return;
+            }
+            var freshInstall = setupProc.setupOutput.indexOf("already installed") === -1;
+            if (freshInstall) {
+                // New bridge downloaded: reload the plugin so the shell runs
+                // the new widget with the binary ready. The reloaded widget
+                // picks up any pending-open marker.
+                root.shellRescan();
+                return;
+            }
+            if (root.userClickedInstall) {
+                root.userClickedInstall = false;
+                touchProc.command = ["rm", "-f", root.pendingOpenMarker];
+                touchProc.running = true;
+                Qt.callLater(root.togglePanel);
+            }
+        }
+    }
+
+    Process {
+        id: markerProc
+        property string out: ""
+        stdout: SplitParser {
+            onRead: function(data) { markerProc.out += data }
+        }
+        onExited: function(exitCode) {
+            if (markerProc.out.indexOf("OPEN") !== -1)
+                Qt.callLater(root.togglePanel);
+        }
+    }
+
+    Process {
+        id: touchProc
+    }
+
+    Process {
+        id: rescanProc
+        onExited: function(exitCode) {
+            if (exitCode !== 0 && root.bridgeReady)
+                root.bridgeError = "Shell reload after bridge install failed";
         }
     }
 
@@ -98,5 +167,8 @@ BarWidget {
         onPressed: root.togglePanel()
     }
 
-    Component.onCompleted: root.ensureBridge()
+    Component.onCompleted: {
+        root.consumePendingOpen();
+        root.ensureBridge();
+    }
 }

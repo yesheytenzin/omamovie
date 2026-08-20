@@ -26,10 +26,10 @@ esac
 mkdir -p "$INSTALL_DIR"
 
 record_plugin_revision() {
-  local revision
+  local force="${1:-0}" revision
   revision="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || printf '%s' "$VERSION")"
   mkdir -p "$(dirname "$REVISION_FILE")"
-  if [[ ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
+  if [[ $force == 1 || ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
     printf '%s\n' "$revision" >"$REVISION_FILE.new"
     mv -f "$REVISION_FILE.new" "$REVISION_FILE"
     if systemd-run --user --collect --quiet /usr/share/omarchy/bin/omarchy-restart-shell; then
@@ -69,4 +69,4 @@ if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then
 else
   warn "bridge installed but did not respond to ping"
 fi
-record_plugin_revision
+record_plugin_revision 1

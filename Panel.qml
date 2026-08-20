@@ -337,7 +337,7 @@ Panel {
                 tooltipText: "Close"
                 fontSize: Style.font.caption
                 horizontalPadding: 6
-                onPressed: root.close()
+                onClicked: root.close()
             }
         }
 

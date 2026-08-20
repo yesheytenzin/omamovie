@@ -3,7 +3,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
-import Quickshell.Wayland
 import QtMultimedia
 import qs.Commons
 import qs.Ui
@@ -506,17 +505,19 @@ Panel {
         owner: root.barIdentity
         bar: root.bar
         open: root.opened
-        centerOnBar: true
+        centerOnBar: !root.playerFullscreen
+        margin: root.playerFullscreen && root.view === "player" ? 0 : Style.gapsOut
+        gap: root.playerFullscreen && root.view === "player" ? 0 : Style.gapsOut
         // Responsive breakpoints: <1366 small 96%/90%, 1366-1920 medium 88%/82% cap 1100, >1920 large 80%/78% cap 1400
         readonly property bool isSmallScreen: panel.screenW > 0 && panel.screenW < 1366
         readonly property bool isLargeScreen: panel.screenW >= 1920
         contentWidth: root.playerFullscreen && root.view === "player"
-                      ? Math.round(panel.screenW * 0.96)
+                      ? panel.screenW
                       : isSmallScreen ? panel.fittedContentWidth(panel.screenW * 0.96)
                       : isLargeScreen ? panel.fittedContentWidth(Math.min(panel.screenW * 0.80, 1400))
                       : panel.fittedContentWidth(Math.min(panel.screenW * 0.88, 1100))
         contentHeight: root.playerFullscreen && root.view === "player"
-                       ? panel.cappedContentHeight(panel.screenH * 0.92)
+                       ? panel.screenH
                        : isSmallScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.90)
                        : isLargeScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.78)
                        : panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.82)
@@ -1175,7 +1176,8 @@ Panel {
         }
     }
 
-    // True fullscreen — covers entire screen, true window fullscreen
+}
+    // True fullscreen - covers entire screen
     PanelWindow {
         id: fullscreenWindow
         visible: root.playerFullscreen && root.view === "player"
@@ -1183,9 +1185,6 @@ Panel {
         color: "black"
         anchors { top: true; bottom: true; left: true; right: true }
         exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.namespace: "omamovie-fullscreen"
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
         VideoOutput {
             id: fullscreenVideoOutput
@@ -1193,26 +1192,24 @@ Panel {
             fillMode: VideoOutput.PreserveAspectFit
         }
 
-        // top bar overlay
         Rectangle {
             anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
             height: 48; color: "#80000000"; visible: fullscreenWindow.visible
             RowLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 10
                 Text { Layout.fillWidth: true; text: root.playerTitle || "Player"; color: "white"; font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight }
-                Button { text: "\u00D7 Exit Full"; fontSize: Style.font.caption; onClicked: root.playerFullscreen = false }
+                Button { text: "✕ Exit Full"; fontSize: Style.font.caption; onClicked: root.playerFullscreen = false }
                 Button { text: "X"; fontSize: Style.font.caption; onClicked: root.close() }
             }
         }
 
-        // bottom controls overlay
         Rectangle {
             anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
             height: 64; color: "#80000000"; visible: fullscreenWindow.visible
             RowLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 10
                 Button {
-                    text: embeddedPlayer.playbackState === MediaPlayer.PlayingState ? "\u23F8" : "\u25B6"
+                    text: embeddedPlayer.playbackState === MediaPlayer.PlayingState ? "⏸" : "▶"
                     onClicked: embeddedPlayer.playbackState === MediaPlayer.PlayingState ? embeddedPlayer.pause() : embeddedPlayer.play()
                 }
                 PanelSlider {
@@ -1232,12 +1229,10 @@ Panel {
             }
         }
 
-        // click to toggle controls? just close on Esc handled by Panel close
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton
             onDoubleClicked: root.playerFullscreen = false
         }
     }
-}
 }

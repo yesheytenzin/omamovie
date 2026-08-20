@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import QtMultimedia
 import qs.Commons
 import qs.Ui
 
@@ -36,6 +37,14 @@ Panel {
     property string query: ""
     property var results: []
     property bool playing: false
+    property bool homeLoading: false
+    property int suggestGen: 0
+    property int searchGen: 0
+    property int detailGen: 0
+    property int resourceGen: 0
+    property string playerUrl: ""
+    property string playerTitle: ""
+    property bool embeddedPlaying: false
 
     readonly property bool isSeries: root.details ? (root.details.subjectType === 2 || root.seasons.length > 0) : false
 
@@ -118,7 +127,10 @@ Panel {
         root.busy = true;
         root.busyLabel = "Searching \u2026";
         root.statusText = "";
+        root.searchGen++;
+        var gen = root.searchGen;
         request("search", { q: q, page: 1 }, function(resp, code) {
+            if (gen !== root.searchGen) return;
             root.busy = false;
             if (!resp || !resp.ok) {
                 root.statusText = (resp && resp.error) || "Search failed";
@@ -128,24 +140,15 @@ Panel {
             resultModel.clear();
             for (var i = 0; i < root.results.length; i++) {
                 var r = root.results[i];
-                resultModel.append({ id: r.id, title: r.title, year: r.year || "", rating: r.rating !== null ? String(r.rating) : "-", cover: r.cover || "", coverPath: "", duration: r.duration || "", stype: r.stype });
+                resultModel.append({ id: r.id, title: r.title, year: r.year || "", rating: r.rating !== null ? String(r.rating) : "-", cover: r.cover || "", coverPath: r.cover || "", duration: r.duration || "", stype: r.stype });
             }
             root.view = "grid";
-            root.seedPosters(root.results);
             root.statusText = resultModel.count + " results for \u201C" + q + "\u201D";
         });
     }
 
     function seedPosters(items) {
-        for (var i = 0; i < items.length; i++) {
-            if (!items[i].cover) continue;
-            (function(idx) {
-                request("poster", { url: items[idx].cover }, function(resp) {
-                    if (resp && resp.ok && resp.path)
-                        resultModel.setProperty(idx, "coverPath", resp.path);
-                });
-            })(i);
-        }
+        // No-op: posters load directly via cover URLs for speed.
     }
 
     function debounceSuggest() {
@@ -160,7 +163,10 @@ Panel {
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
         root.busyLabel = "Loading details \u2026";
+        root.detailGen++;
+        var gen = root.detailGen;
         request("details", { id: it.id }, function(resp, code) {
+            if (gen !== root.detailGen) return;
             root.busy = false;
             if (!resp || !resp.ok) {
                 root.statusText = (resp && resp.error) || "Details failed";
@@ -179,12 +185,44 @@ Panel {
             root.statusText = root.isSeries ? "Pick a season and episode" : "Pick a stream and press Play";
 
             var cover = root.coverUrlOf(root.details);
-            if (cover) {
-                request("poster", { url: cover }, function(pr) {
-                    if (pr && pr.ok && pr.path) detailPoster.source = "file://" + pr.path;
-                });
-            }
+            detailPoster.source = cover || "";
 
+            if (root.isSeries) root.loadStreams(root.curSeason, root.curEp);
+            else root.loadStreams(0, 0);
+        });
+    }
+
+    function openHomeDetails(idx) {
+        if (idx < 0 || idx >= homeModel.count) return;
+        var it = homeModel.get(idx);
+        // reuse search result path: push to resultModel temporarily
+        root.currentId = it.id;
+        root.currentTitle = it.title;
+        root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
+        root.busy = true;
+        root.busyLabel = "Loading details \u2026";
+        root.detailGen++;
+        var gen = root.detailGen;
+        request("details", { id: it.id }, function(resp, code) {
+            if (gen !== root.detailGen) return;
+            root.busy = false;
+            if (!resp || !resp.ok) {
+                root.statusText = (resp && resp.error) || "Details failed";
+                return;
+            }
+            root.details = resp.value;
+            var ss = (resp.value && resp.value.seasons && resp.value.seasons.seasons) || [];
+            root.seasons = ss.length ? ss : [];
+            root.curSeason = 1;
+            root.maxEp = root.episodeCount(1);
+            root.curEp = root.isSeries ? 1 : 0;
+            root.streams = [];
+            root.selStream = -1;
+            root.subs = [];
+            root.view = "details";
+            root.statusText = root.isSeries ? "Pick a season and episode" : "Pick a stream and press Play";
+            var cover = root.coverUrlOf(root.details);
+            detailPoster.source = cover || "";
             if (root.isSeries) root.loadStreams(root.curSeason, root.curEp);
             else root.loadStreams(0, 0);
         });
@@ -192,8 +230,11 @@ Panel {
 
     function loadStreams(se, ep) {
         root.busy = true;
-        root.busyLabel = (root.isSeries ? "Loading streams \u2026" : "Loading streams \u2026");
+        root.busyLabel = "Loading streams \u2026";
+        root.resourceGen++;
+        var gen = root.resourceGen;
         request("resources", { id: root.currentId, season: se, episode: ep, perPage: 20 }, function(resp, code) {
+            if (gen !== root.resourceGen) return;
             root.busy = false;
             root.streams = (resp && resp.ok && resp.items) ? resp.items : [];
             root.selStream = root.streams.length > 0 ? 0 : -1;
@@ -207,6 +248,28 @@ Panel {
     }
 
     function play() {
+        // Default Play now uses embedded player for instant in-UI playback.
+        root.playEmbedded();
+    }
+
+    function playEmbedded() {
+        if (root.selStream < 0 || root.streams.length === 0) return;
+        var s = root.streams[root.selStream];
+        var link = s.resourceLink || s.link || "";
+        if (!link) { root.statusText = "Stream has no URL"; return; }
+        root.playerUrl = link;
+        root.playerTitle = root.currentTitle + (root.isSeries ? (" S" + root.curSeason + "E" + root.curEp) : "");
+        root.view = "player";
+        root.embeddedPlaying = true;
+        root.statusText = "Playing \u201C" + root.playerTitle + "\u201D";
+        // Defer source assignment to next tick to ensure view switch completes
+        Qt.callLater(function() {
+            embeddedPlayer.source = link;
+            embeddedPlayer.play();
+        });
+    }
+
+    function playExternal() {
         if (root.selStream < 0 || root.streams.length === 0) return;
         var s = root.streams[root.selStream];
         var link = s.resourceLink || s.link || "";
@@ -251,23 +314,87 @@ Panel {
         }
     }
 
+    AudioOutput {
+        id: embeddedAudio
+        volume: 1.0
+    }
+
+    MediaPlayer {
+        id: embeddedPlayer
+        audioOutput: embeddedAudio
+        videoOutput: embeddedVideoOutput
+        onErrorOccurred: function(error, errorString) {
+            root.statusText = "Playback error: " + errorString;
+            root.embeddedPlaying = false;
+        }
+        onPlaybackStateChanged: {
+            root.embeddedPlaying = (playbackState === MediaPlayer.PlayingState);
+        }
+        onPositionChanged: {
+            // keep slider in sync; no-op if user dragging
+        }
+    }
+
+    function loadHome(force) {
+        if (root.homeLoading) return;
+        if (!force && homeModel.count > 0) { root.view = "home"; return; }
+        root.homeLoading = true;
+        root.busy = true;
+        root.busyLabel = "Loading home \u2026";
+        request("homepage", { tab: "2", page: 1, perPage: 24 }, function(resp) {
+            root.homeLoading = false;
+            root.busy = false;
+            if (!resp || !resp.ok) {
+                root.statusText = (resp && resp.error) || "Could not load home";
+                root.view = "home";
+                return;
+            }
+            var items = resp.items || [];
+            // Shuffle for variety
+            for (var i = items.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1));
+                var tmp = items[i]; items[i] = items[j]; items[j] = tmp;
+            }
+            homeModel.clear();
+            for (var k = 0; k < items.length && k < 24; k++) {
+                var r = items[k];
+                homeModel.append({ id: r.id, title: r.title, year: r.year || "", rating: r.rating !== null ? String(r.rating) : "-", cover: r.cover || "", coverPath: r.cover || "", duration: r.duration || "", stype: r.stype });
+            }
+            root.view = "home";
+            root.statusText = homeModel.count ? "Discover \u2022 " + homeModel.count + " titles" : "Search movies, shows and anime";
+        });
+    }
+
     function goHome() {
-        root.view = "home";
-        root.statusText = "Search movies, shows and anime";
+        if (homeModel.count === 0) root.loadHome(false);
+        else root.view = "home";
+        if (root.view === "home" && homeModel.count) root.statusText = "Discover \u2022 " + homeModel.count + " titles";
+        else root.statusText = "Search movies, shows and anime";
     }
 
     function backToGrid() {
         root.view = "grid";
     }
 
+    function stopEmbedded() {
+        if (embeddedPlayer) {
+            embeddedPlayer.stop();
+            embeddedPlayer.source = "";
+        }
+        root.embeddedPlaying = false;
+        root.playerUrl = "";
+    }
+
     // ---------------- open/close wiring (same contract as pacman) ----------------
     function openFromHotkey() {
+        if (homeModel.count === 0 && !root.homeLoading) root.loadHome(false);
         root.controller.show();
         Qt.callLater(function() {
             if (root.opened) searchField.forceActiveFocus();
         });
     }
     function close() {
+        if (root.view === "player") root.stopEmbedded();
         root.controller.hide();
     }
     function toggle() {
@@ -283,15 +410,19 @@ Panel {
 
     // ---------------- UI ----------------
     ListModel { id: resultModel }
+    ListModel { id: homeModel }
 
     Timer {
         id: suggestTimer
-        interval: 260
+        interval: 380
         repeat: false
         onTriggered: {
             var q = searchField.text.trim();
             if (q.length < 2) { suggestionModel.clear(); return; }
+            root.suggestGen++;
+            var gen = root.suggestGen;
             request("suggest", { q: q }, function(resp) {
+                if (gen !== root.suggestGen) return;
                 suggestionModel.clear();
                 var list = (resp && resp.ok && resp.suggestions) ? resp.suggestions : [];
                 for (var i = 0; i < list.length && i < 8; i++)
@@ -308,8 +439,8 @@ Panel {
         bar: root.bar
         open: root.opened
         centerOnBar: true
-        contentWidth: panel.fittedContentWidth(820)
-        contentHeight: panel.fittedContentHeight(560)
+        contentWidth: panel.fittedContentWidth(panel.screenW * 0.85)
+        contentHeight: panel.cappedContentHeight(panel.screenH * 0.85)
 
         ColumnLayout {
             anchors.fill: parent
@@ -391,16 +522,117 @@ Panel {
             Layout.fillHeight: true
             clip: true
 
-            // ---- home hint ----
-            Text {
-                anchors.centerIn: parent
+            // ---- home (discover) ----
+            Item {
+                anchors.fill: parent
                 visible: root.view === "home"
-                text: "Type above to search cinematic corners of the internet \u2014\nmovies, TV shows, anime \u2026"
-                horizontalAlignment: Text.AlignHCenter
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-                color: Qt.darker(Color.foreground, 1.5)
-                lineHeight: 1.6
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.homeLoading ? "Discover \u2026" : (homeModel.count ? "Discover \u2022 tap any title" : "Discover")
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.body
+                            font.bold: true
+                            color: Color.accent
+                        }
+                        Button {
+                            text: "\u21bb"
+                            tooltipText: "Refresh"
+                            fontSize: Style.font.caption
+                            enabled: !root.homeLoading
+                            onClicked: root.loadHome(true)
+                        }
+                    }
+                    GridView {
+                        id: homeGrid
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        visible: !root.homeLoading
+                        model: homeModel
+                        cellWidth: 168
+                        cellHeight: 236
+                        delegate: Item {
+                            width: homeGrid.cellWidth
+                            height: homeGrid.cellHeight
+                            Column {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 5
+                                Rectangle {
+                                    width: parent.width
+                                    height: parent.height * 0.74
+                                    radius: Style.cornerRadius
+                                    color: Qt.darker(Color.foreground, 2.2)
+                                    clip: true
+                                    Image {
+                                        anchors.fill: parent
+                                        source: model.cover || model.coverPath || ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        visible: source !== ""
+                                        asynchronous: true
+                                        cache: true
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: !model.cover && !model.coverPath
+                                        text: "\uf03d"
+                                        font.family: Style.font.family
+                                        font.pixelSize: 30
+                                        color: Qt.darker(Color.foreground, 1.3)
+                                    }
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: model.title
+                                    elide: Text.ElideRight
+                                    font.family: Style.font.family
+                                    font.pixelSize: Style.font.caption
+                                    color: Color.foreground
+                                    maximumLineCount: 1
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: (model.year ? model.year : "\u2013") + "  \u2605 " + model.rating
+                                    elide: Text.ElideRight
+                                    font.family: Style.font.family
+                                    font.pixelSize: Style.font.caption - 2
+                                    color: Qt.darker(Color.foreground, 1.5)
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.openHomeDetails(index)
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: root.homeLoading
+                        text: "Loading highlights \u2026"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        color: Qt.darker(Color.foreground, 1.5)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: !root.homeLoading && homeModel.count === 0
+                        text: "No highlights yet \u2014 try Search above."
+                        horizontalAlignment: Text.AlignHCenter
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        color: Qt.darker(Color.foreground, 1.4)
+                    }
+                }
             }
 
             // ---- results grid ----
@@ -427,14 +659,15 @@ Panel {
                             clip: true
                             Image {
                                 anchors.fill: parent
-                                source: model.coverPath ? "file://" + model.coverPath : ""
+                                source: model.cover || model.coverPath || ""
                                 fillMode: Image.PreserveAspectCrop
                                 visible: source !== ""
                                 asynchronous: true
+                                cache: true
                             }
                             Text {
                                 anchors.centerIn: parent
-                                visible: source === ""
+                                visible: !model.cover && !model.coverPath
                                 text: "\uf03d"
                                 font.family: Style.font.family
                                 font.pixelSize: 30
@@ -643,12 +876,123 @@ Panel {
                                 color: Qt.darker(Color.foreground, 1.4)
                             }
                             Button {
-                                text: "\u25B6 Play"
+                                text: "\u25B6 Play here"
                                 selected: true
+                                enabled: root.selStream >= 0 && !root.embeddedPlaying
+                                onClicked: root.playEmbedded()
+                            }
+                            Button {
+                                text: "mpv"
+                                tooltipText: "Open in mpv (with subtitles)"
                                 enabled: root.selStream >= 0 && !root.playing
-                                onClicked: root.play()
+                                onClicked: root.playExternal()
                             }
                         }
+                    }
+                }
+            }
+
+            // ---- embedded player ----
+            Item {
+                anchors.fill: parent
+                visible: root.view === "player"
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.playerTitle || "Player"
+                            elide: Text.ElideRight
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.title
+                            font.bold: true
+                            color: Color.foreground
+                        }
+                        Button {
+                            text: "\u2190 Back"
+                            fontSize: Style.font.caption
+                            onClicked: { root.stopEmbedded(); root.view = "details"; }
+                        }
+                        Button {
+                            text: "X"
+                            tooltipText: "Close"
+                            fontSize: Style.font.caption
+                            onClicked: root.close()
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: Style.cornerRadius
+                        color: "black"
+                        clip: true
+                        VideoOutput {
+                            id: embeddedVideoOutput
+                            anchors.fill: parent
+                            fillMode: VideoOutput.PreserveAspectFit
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: embeddedPlayer.playbackState !== MediaPlayer.PlayingState && embeddedPlayer.playbackState !== MediaPlayer.PausedState
+                            text: root.embeddedPlaying ? "Buffering \u2026" : "\uf03d"
+                            font.family: Style.font.family
+                            font.pixelSize: 32
+                            color: "white"
+                            opacity: 0.7
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Button {
+                            text: embeddedPlayer.playbackState === MediaPlayer.PlayingState ? "\u23F8 Pause" : "\u25B6 Play"
+                            enabled: root.playerUrl !== ""
+                            onClicked: {
+                                if (embeddedPlayer.playbackState === MediaPlayer.PlayingState) embeddedPlayer.pause();
+                                else embeddedPlayer.play();
+                            }
+                        }
+                        Slider {
+                            id: playerSlider
+                            Layout.fillWidth: true
+                            from: 0
+                            to: embeddedPlayer.duration > 0 ? embeddedPlayer.duration : 1
+                            value: embeddedPlayer.position
+                            enabled: embeddedPlayer.seekable
+                            onMoved: embeddedPlayer.setPosition(value)
+                        }
+                        Text {
+                            text: {
+                                function fmt(ms) {
+                                    if (!ms || ms < 0) return "0:00";
+                                    var s = Math.floor(ms/1000);
+                                    var m = Math.floor(s/60);
+                                    var sec = s % 60;
+                                    return m + ":" + (sec < 10 ? "0"+sec : sec);
+                                }
+                                return fmt(embeddedPlayer.position) + " / " + fmt(embeddedPlayer.duration);
+                            }
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.caption - 1
+                            color: Qt.darker(Color.foreground, 1.2)
+                        }
+                        Button {
+                            text: "mpv"
+                            tooltipText: "Open same stream in mpv"
+                            enabled: root.selStream >= 0
+                            onClicked: root.playExternal()
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.statusText
+                        elide: Text.ElideRight
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption - 2
+                        color: Qt.darker(Color.foreground, 1.4)
                     }
                 }
             }

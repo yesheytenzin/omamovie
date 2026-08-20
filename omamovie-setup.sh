@@ -7,7 +7,7 @@ INSTALL_DIR="${INSTALL_DIR:-$DIR/.runtime}"
 BIN="omamovie-bridge"
 VERSION="$(jq -er '.version' "$DIR/manifest.json")"
 VERSION_FILE="$INSTALL_DIR/version"
-REVISION_FILE="$INSTALL_DIR/plugin-revision"
+REVISION_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/omamovie/plugin-revision"
 RELEASE_BASE="${OMAMOVIE_RELEASE_BASE:-https://github.com/yesheytenzin/omamovie/releases/download/v$VERSION}"
 
 say()  { printf '\033[1;36m[omamovie]\033[0m %s\n' "$*"; }
@@ -28,6 +28,7 @@ mkdir -p "$INSTALL_DIR"
 record_plugin_revision() {
   local revision
   revision="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || printf '%s' "$VERSION")"
+  mkdir -p "$(dirname "$REVISION_FILE")"
   if [[ ! -f "$REVISION_FILE" || $(<"$REVISION_FILE") != "$revision" ]]; then
     printf '%s\n' "$revision" >"$REVISION_FILE.new"
     mv -f "$REVISION_FILE.new" "$REVISION_FILE"

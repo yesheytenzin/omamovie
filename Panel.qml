@@ -149,10 +149,6 @@ Panel {
         });
     }
 
-    function seedPosters(items) {
-        // No-op: posters load directly via cover URLs for speed.
-    }
-
     function debounceSuggest() {
         suggestTimer.restart();
     }
@@ -542,9 +538,9 @@ Panel {
                       : panel.fittedContentWidth(Math.min(panel.screenW * 0.88, 1100))
         contentHeight: root.playerFullscreen && root.view === "player"
                        ? panel.screenH
-                       : isSmallScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.90)
-                       : isLargeScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.78)
-                       : panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.82)
+                       : isSmallScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.92)
+                       : isLargeScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.84)
+                       : panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.88)
 
         ColumnLayout {
             id: mainColumn
@@ -655,20 +651,20 @@ Panel {
             id: body
             Layout.fillWidth: true
             Layout.preferredHeight: {
-                if (root.view === "player" && root.playerFullscreen) return Math.round(panel.screenH * 0.72);
-                if (root.view === "player") return 420;
+                if (root.view === "player" && root.playerFullscreen) return Math.round(panel.screenH * 0.78);
+                if (root.view === "player") return 460;
                 if (root.view === "home") {
-                    if (homeGrid.contentHeight === 0) return Math.round(Math.min(420, panel.screenH * 0.48));
-                    return Math.round(Math.min(Math.max(340, homeGrid.contentHeight + 16), panel.screenH * 0.58));
+                    if (homeGrid.contentHeight === 0) return Math.round(Math.min(460, panel.screenH * 0.52));
+                    return Math.round(Math.min(Math.max(360, homeGrid.contentHeight + 16), panel.screenH * 0.64));
                 }
                 if (root.view === "grid") {
-                    if (grid.contentHeight === 0) return 320;
-                    return Math.round(Math.min(Math.max(340, grid.contentHeight + 8), panel.screenH * 0.58));
+                    if (grid.contentHeight === 0) return 360;
+                    return Math.round(Math.min(Math.max(360, grid.contentHeight + 8), panel.screenH * 0.64));
                 }
                 if (root.view === "details") {
-                    return Math.round(Math.min(Math.max(380, detailsContent.implicitHeight + 20), panel.screenH * 0.62));
+                    return Math.round(Math.min(Math.max(400, detailsContent.implicitHeight + 20), panel.screenH * 0.70));
                 }
-                return 340;
+                return 360;
             }
             Layout.fillHeight: false
             clip: true

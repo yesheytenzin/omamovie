@@ -43,6 +43,60 @@ fn clean_title(raw: &str) -> String {
     raw.split('[').next().unwrap_or(raw).trim().to_string()
 }
 
+fn is_trailer_title(title: &str) -> bool {
+    let t = title.trim().to_lowercase();
+    t.starts_with("trailer-") || t.starts_with("trailer ") || t.starts_with("trailer:")
+}
+
+fn filter_and_sort_search_items(mut items: Vec<serde_json::Value>, query: &str) -> Vec<serde_json::Value> {
+    let q = query.trim().to_lowercase();
+    // Dedupe by id first (same trailer repeated per season)
+    {
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|v| {
+            if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
+                if seen.contains(id) {
+                    return false;
+                }
+                seen.insert(id.to_string());
+            }
+            true
+        });
+    }
+    // Filter to movies/series only and non-trailer titles
+    items.retain(|v| {
+        let stype = v.get("stype").and_then(|s| s.as_i64()).unwrap_or(0);
+        if stype != 1 && stype != 2 {
+            return false;
+        }
+        if let Some(title) = v.get("title").and_then(|t| t.as_str()) {
+            if is_trailer_title(title) {
+                return false;
+            }
+        }
+        true
+    });
+    // Sort by relevance: exact match > contains query > others, then by rating desc
+    items.sort_by(|a, b| {
+        let ta = a.get("title").and_then(|t| t.as_str()).unwrap_or("").to_lowercase();
+        let tb = b.get("title").and_then(|t| t.as_str()).unwrap_or("").to_lowercase();
+        let score = |t: &str| {
+            if t == q { 0 }
+            else if t.contains(&q) { 1 }
+            else { 2 }
+        };
+        let sa = score(&ta);
+        let sb = score(&tb);
+        if sa != sb {
+            return sa.cmp(&sb);
+        }
+        let ra = a.get("rating").and_then(|r| r.as_f64()).unwrap_or(0.0);
+        let rb = b.get("rating").and_then(|r| r.as_f64()).unwrap_or(0.0);
+        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    items
+}
+
 fn unwrap_subjects(value: &Value) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     if let Some(groups) = value.get("results").and_then(|g| g.as_array()) {
@@ -171,7 +225,9 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                     .into_iter()
                     .filter_map(|subj| {
                         let name = subj.get("postTitle").or_else(|| subj.get("title")).and_then(|n| n.as_str()).map(|n| clean_title(n)).unwrap_or_default();
-                        if name.is_empty() { return None; }
+                        if name.is_empty() || is_trailer_title(&name) { return None; }
+                        let stype = moviebox_tui::service::stype(&subj);
+                        if stype != 1 && stype != 2 { return None; }
                         let id = subject_id(subj.get("subjectId").or_else(|| subj.get("id")).unwrap_or(&Value::Null)).unwrap_or_default();
                         let cover = subj.get("cover").and_then(|c| c.get("url").and_then(|u| u.as_str())).map(|u| u.to_string()).or_else(|| extract_cover_url(&subj).filter(|u| u.starts_with("http")));
                         Some(json!({ "name": name, "id": id, "cover": cover }))
@@ -191,7 +247,11 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                         .and_then(|n| n.as_str())
                         .map(|n| clean_title(n))
                         .unwrap_or_default();
-                    if name.is_empty() {
+                    if name.is_empty() || is_trailer_title(&name) {
+                        return None;
+                    }
+                    let stype = moviebox_tui::service::stype(&s);
+                    if stype != 1 && stype != 2 {
                         return None;
                     }
                     let id = subject_id(
@@ -208,7 +268,7 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                     Some(json!({ "name": name, "id": id, "cover": cover }))
                 })
                 .collect();
-            Ok(json!({ "suggestions": items }))
+            Ok(json!({ "suggestions": items.into_iter().take(8).collect::<Vec<_>>() }))
         }
 
         "search" => {
@@ -222,8 +282,9 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                     .iter()
                     .map(normalize_search_item)
                     .collect();
-                if !items.is_empty() {
-                    return Ok(json!({ "items": items }));
+                let filtered = filter_and_sort_search_items(items, &q);
+                if !filtered.is_empty() {
+                    return Ok(json!({ "items": filtered }));
                 }
             }
             let _ = svc.client.init().await;
@@ -235,7 +296,71 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if !items.is_empty() {
                 moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &q, page, &raw);
             }
-            Ok(json!({ "items": items }))
+            let mut filtered = filter_and_sort_search_items(items, &q);
+            // If we have few valid results, try next pages to find exact title
+            if filtered.len() < 5 && page == 1 {
+                for next_page in 2..=3 {
+                    if filtered.len() >= 5 { break; }
+                    if let Ok(raw2) = svc.search(ProviderKind::MovieBox, &q, next_page).await {
+                        let items2: Vec<Value> = unwrap_subjects(&raw2).iter().map(normalize_search_item).collect();
+                        if items2.is_empty() { break; }
+                        moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &q, next_page, &raw2);
+                        let mut more = filter_and_sort_search_items(items2, &q);
+                        // Only keep more that contains query as substring for relevance
+                        more.retain(|v| {
+                            if let Some(t) = v.get("title").and_then(|t| t.as_str()) {
+                                t.to_lowercase().contains(&q.to_lowercase())
+                            } else { false }
+                        });
+                        filtered.append(&mut more);
+                        // Dedupe again
+                        let mut seen = std::collections::HashSet::new();
+                        filtered.retain(|v| {
+                            if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
+                                if seen.contains(id) { return false; }
+                                seen.insert(id.to_string());
+                            }
+                            true
+                        });
+                        if !more.is_empty() { break; }
+                    } else { break; }
+                }
+                if filtered.is_empty() {
+                    // Fallback: show original first page sorted, trailers last, deduped
+                    let mut fallback: Vec<Value> = unwrap_subjects(&raw).iter().map(normalize_search_item).collect();
+                    {
+                        let mut seen = std::collections::HashSet::new();
+                        fallback.retain(|v| {
+                            if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
+                                if seen.contains(id) { return false; }
+                                seen.insert(id.to_string());
+                            }
+                            true
+                        });
+                    }
+                    fallback.sort_by(|a,b| {
+                        let ta = a.get("title").and_then(|t| t.as_str()).unwrap_or("").to_lowercase();
+                        let tb = b.get("title").and_then(|t| t.as_str()).unwrap_or("").to_lowercase();
+                        let is_trailer = |t: &str| t.starts_with("trailer-") || t.starts_with("trailer ");
+                        let a_tr = is_trailer(&ta);
+                        let b_tr = is_trailer(&tb);
+                        if a_tr != b_tr { return a_tr.cmp(&b_tr); }
+                        let a_contains = ta.contains(&q.to_lowercase());
+                        let b_contains = tb.contains(&q.to_lowercase());
+                        if a_contains != b_contains { return b_contains.cmp(&a_contains); }
+                        b.get("rating").and_then(|r| r.as_f64()).unwrap_or(0.0).partial_cmp(&a.get("rating").and_then(|r| r.as_f64()).unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    filtered = fallback.into_iter().take(12).collect();
+                }
+            }
+            // Final filter: keep only items where title contains query for relevance
+            let query_filtered: Vec<Value> = filtered.iter().filter(|v| {
+                if let Some(t) = v.get("title").and_then(|t| t.as_str()) {
+                    t.to_lowercase().contains(&q.to_lowercase())
+                } else { false }
+            }).cloned().collect();
+            let final_items = if !query_filtered.is_empty() { query_filtered } else { filtered };
+            Ok(json!({ "items": final_items }))
         }
 
         "details" => {

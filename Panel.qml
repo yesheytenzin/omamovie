@@ -535,9 +535,9 @@ Panel {
         readonly property real uiScale: Math.min(1.4, Math.max(0.9, panel.screenW / 1920))
         contentWidth: root.playerFullscreen && root.view === "player"
                       ? panel.screenW
-                      : isSmallScreen ? panel.fittedContentWidth(panel.screenW * 0.96)
-                      : isLargeScreen ? panel.fittedContentWidth(panel.screenW * 0.86)
-                      : panel.fittedContentWidth(panel.screenW * 0.92)
+                      : isSmallScreen ? panel.fittedContentWidth(panel.screenW * 0.92)
+                      : isLargeScreen ? panel.fittedContentWidth(panel.screenW * 0.82)
+                      : panel.fittedContentWidth(panel.screenW * 0.88)
         // Same computed size for every view (home/grid/details/player)
         contentHeight: root.playerFullscreen && root.view === "player"
                        ? panel.screenH

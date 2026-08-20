@@ -528,20 +528,22 @@ Panel {
         centerOnBar: true
         margin: root.playerFullscreen && root.view === "player" ? 0 : Style.gapsOut
         gap: root.playerFullscreen && root.view === "player" ? 0 : Style.gapsOut
-        // Responsive breakpoints: <1366 small 96%/90%, 1366-1920 medium 88%/82% cap 1100, >1920 large 80%/78% cap 1400
+        // Dynamic sizing: fractions of the user's screen resolution, no fixed caps.
+        // uiScale scales poster cells/details with the screen width (1.0 at 1920px).
         readonly property bool isSmallScreen: panel.screenW > 0 && panel.screenW < 1366
         readonly property bool isLargeScreen: panel.screenW >= 1920
+        readonly property real uiScale: Math.min(1.4, Math.max(0.9, panel.screenW / 1920))
         contentWidth: root.playerFullscreen && root.view === "player"
                       ? panel.screenW
                       : isSmallScreen ? panel.fittedContentWidth(panel.screenW * 0.96)
-                      : isLargeScreen ? panel.fittedContentWidth(Math.min(panel.screenW * 0.80, 1400))
-                      : panel.fittedContentWidth(Math.min(panel.screenW * 0.88, 1100))
-        // Fixed height - every view (home/grid/details/player) gets the same size
+                      : isLargeScreen ? panel.fittedContentWidth(panel.screenW * 0.86)
+                      : panel.fittedContentWidth(panel.screenW * 0.92)
+        // Same computed size for every view (home/grid/details/player)
         contentHeight: root.playerFullscreen && root.view === "player"
                        ? panel.screenH
-                       : isSmallScreen ? panel.fittedContentHeight(panel.screenH * 0.84, panel.screenH * 0.92)
-                       : isLargeScreen ? panel.fittedContentHeight(panel.screenH * 0.72, panel.screenH * 0.84)
-                       : panel.fittedContentHeight(panel.screenH * 0.78, panel.screenH * 0.88)
+                       : isSmallScreen ? panel.fittedContentHeight(panel.screenH * 0.86, panel.screenH * 0.94)
+                       : isLargeScreen ? panel.fittedContentHeight(panel.screenH * 0.84, panel.screenH * 0.90)
+                       : panel.fittedContentHeight(panel.screenH * 0.82, panel.screenH * 0.90)
 
         ColumnLayout {
             id: mainColumn
@@ -686,8 +688,8 @@ Panel {
                         reuseItems: true
                         visible: !root.homeLoading
                         model: homeModel
-                        cellWidth: 168
-                        cellHeight: 236
+                        cellWidth: Math.round(168 * panel.uiScale)
+                        cellHeight: Math.round(236 * panel.uiScale)
                         delegate: Item {
                             id: homeDelegate
                             width: homeGrid.cellWidth
@@ -798,8 +800,8 @@ Panel {
                 boundsBehavior: Flickable.StopAtBounds
                 maximumFlickVelocity: 4000
                 reuseItems: true
-                cellWidth: 168
-                cellHeight: 236
+                cellWidth: Math.round(168 * panel.uiScale)
+                cellHeight: Math.round(236 * panel.uiScale)
                 delegate: Item {
                     id: gridDelegate
                     width: grid.cellWidth
@@ -895,7 +897,7 @@ Panel {
 
                     // poster
                     Rectangle {
-                        Layout.preferredWidth: 170
+                        Layout.preferredWidth: Math.round(170 * panel.uiScale)
                         Layout.fillHeight: true
                         radius: Style.cornerRadius
                         color: Qt.darker(Color.foreground, 2.2)

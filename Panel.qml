@@ -557,7 +557,7 @@ Panel {
                 spacing: 2
                 RowLayout {
                     spacing: 8
-                    Text { text: "\uf03d"; font.family: Style.font.family; font.pixelSize: Style.font.title; color: Color.accent }
+                    Text { text: "󰨂"; font.family: Style.font.family; font.pixelSize: Style.font.title; color: Color.accent }
                     Text { text: "OmaMovie"; font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true; color: Color.foreground }
                     Rectangle { width: 1; height: 18; color: Color.foreground; opacity: 0.12; Layout.leftMargin: 4; Layout.rightMargin: 4 }
                     Text {
@@ -743,7 +743,7 @@ Panel {
                                     Text {
                                         anchors.centerIn: parent
                                         visible: !model.cover && !model.coverPath
-                                        text: "\uf03d"
+                                        text: "󰨂"
                                         font.family: Style.font.family
                                         font.pixelSize: 30
                                         color: Qt.darker(Color.foreground, 1.3)
@@ -863,7 +863,7 @@ Panel {
                             Text {
                                 anchors.centerIn: parent
                                 visible: !model.cover && !model.coverPath
-                                text: "\uf03d"
+                                text: "󰨂"
                                 font.family: Style.font.family
                                 font.pixelSize: 30
                                 color: Qt.darker(Color.foreground, 1.3)
@@ -931,7 +931,7 @@ Panel {
                         Text {
                             anchors.centerIn: parent
                             visible: detailPoster.source === ""
-                            text: "\uf03d"
+                            text: "󰨂"
                             font.family: Style.font.family
                             font.pixelSize: 40
                             color: Qt.darker(Color.foreground, 1.3)
@@ -1150,7 +1150,7 @@ Panel {
                         Text {
                             anchors.centerIn: parent
                             visible: embeddedPlayer.playbackState !== MediaPlayer.PlayingState && embeddedPlayer.playbackState !== MediaPlayer.PausedState
-                            text: root.embeddedPlaying ? "Buffering \u2026" : "\uf03d"
+                            text: root.embeddedPlaying ? "Buffering \u2026" : "󰨂"
                             font.family: Style.font.family
                             font.pixelSize: 32
                             color: "white"

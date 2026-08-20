@@ -46,6 +46,14 @@ omarchy pkg add mpv
 - Change the bar glyph by editing `text` in `BarWidget.qml` (it is a Nerd Font
   glyph, `\uf03d`).
 
+## Update
+
+```bash
+omarchy plugin update tenzin.omamovie --yes   # pull latest plugin code
+# then refresh the moviebox binary itself:
+~/.config/omarchy/plugins/tenzin.omamovie/moviebox-setup.sh
+```
+
 ## Uninstall
 
 ```bash

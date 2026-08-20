@@ -65,6 +65,34 @@ fn unwrap_subjects(value: &Value) -> Vec<Value> {
     out
 }
 
+fn unwrap_homepage_subjects(value: &Value) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    if let Some(items) = value.get("items").and_then(|v| v.as_array()) {
+        for item in items {
+            if let Some(banners) = item.get("banner").and_then(|b| b.get("banners")).and_then(|b| b.as_array()) {
+                for b in banners {
+                    if let Some(subject) = b.get("subject") {
+                        out.push(subject.clone());
+                    }
+                }
+            }
+            if let Some(custom_items) = item.get("customData").and_then(|c| c.get("items")).and_then(|i| i.as_array()) {
+                for ci in custom_items {
+                    if let Some(subject) = ci.get("subject") {
+                        out.push(subject.clone());
+                    }
+                }
+            }
+            if let Some(subjects) = item.get("subjects").and_then(|s| s.as_array()) {
+                for s in subjects {
+                    out.push(s.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
 fn normalize_search_item(item: &Value) -> Value {
     let id = subject_id(item.get("subjectId").or_else(|| item.get("id")).unwrap_or(&Value::Null))
         .unwrap_or_default();
@@ -137,6 +165,22 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if q.is_empty() {
                 return Ok(json!({ "suggestions": [] }));
             }
+            // Check search cache for page 1 as suggest proxy
+            if let Some(cached) = moviebox_tui::cache::get_provider_search_cache(ProviderKind::MovieBox, &q, 1) {
+                let items: Vec<Value> = unwrap_subjects(&cached)
+                    .into_iter()
+                    .filter_map(|subj| {
+                        let name = subj.get("postTitle").or_else(|| subj.get("title")).and_then(|n| n.as_str()).map(|n| clean_title(n)).unwrap_or_default();
+                        if name.is_empty() { return None; }
+                        let id = subject_id(subj.get("subjectId").or_else(|| subj.get("id")).unwrap_or(&Value::Null)).unwrap_or_default();
+                        let cover = subj.get("cover").and_then(|c| c.get("url").and_then(|u| u.as_str())).map(|u| u.to_string()).or_else(|| extract_cover_url(&subj).filter(|u| u.starts_with("http")));
+                        Some(json!({ "name": name, "id": id, "cover": cover }))
+                    }).collect();
+                if !items.is_empty() {
+                    return Ok(json!({ "suggestions": items.into_iter().take(8).collect::<Vec<_>>() }));
+                }
+            }
+            let _ = svc.client.init().await;
             let raw = svc.suggest(&q).await?;
             let items: Vec<Value> = unwrap_subjects(&raw)
                 .into_iter()
@@ -173,11 +217,24 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if q.is_empty() {
                 return Ok(json!({ "items": [] }));
             }
+            if let Some(cached) = moviebox_tui::cache::get_provider_search_cache(ProviderKind::MovieBox, &q, page) {
+                let items: Vec<Value> = unwrap_subjects(&cached)
+                    .iter()
+                    .map(normalize_search_item)
+                    .collect();
+                if !items.is_empty() {
+                    return Ok(json!({ "items": items }));
+                }
+            }
+            let _ = svc.client.init().await;
             let raw = svc.search(ProviderKind::MovieBox, &q, page).await?;
             let items: Vec<Value> = unwrap_subjects(&raw)
                 .iter()
                 .map(normalize_search_item)
                 .collect();
+            if !items.is_empty() {
+                moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &q, page, &raw);
+            }
             Ok(json!({ "items": items }))
         }
 
@@ -186,7 +243,12 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if id.is_empty() {
                 return Err("missing id".into());
             }
+            if let Some(cached) = moviebox_tui::cache::get_provider_details_cache(ProviderKind::MovieBox, &id) {
+                return Ok(json!({ "value": cached }));
+            }
+            let _ = svc.client.init().await;
             let value = svc.details(ProviderKind::MovieBox, &id).await?;
+            moviebox_tui::cache::set_provider_details_cache(ProviderKind::MovieBox, &id, &value);
             Ok(json!({ "value": value }))
         }
 
@@ -203,6 +265,13 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if id.is_empty() {
                 return Err("missing id".into());
             }
+            if resolution.is_none() {
+                if let Some(cached) = moviebox_tui::cache::get_provider_stream_cache(ProviderKind::MovieBox, &id, season, episode) {
+                    let items = cached.get("list").cloned().unwrap_or_else(|| json!([]));
+                    return Ok(json!({ "items": items, "value": cached }));
+                }
+            }
+            let _ = svc.client.init().await;
             let raw = svc
                 .client
                 .get_resources(
@@ -215,6 +284,9 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                 )
                 .await
                 .map_err(|e| e.to_string())?;
+            if resolution.is_none() {
+                moviebox_tui::cache::set_provider_stream_cache(ProviderKind::MovieBox, &id, season, episode, &raw);
+            }
             let items = raw.get("list").cloned().unwrap_or_else(|| json!([]));
             Ok(json!({ "items": items, "value": raw }))
         }
@@ -225,6 +297,7 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if id.is_empty() || rid.is_empty() {
                 return Err("missing id or rid".into());
             }
+            let _ = svc.client.init().await;
             let payload = svc.get_ext_captions(&id, &rid).await?;
             let options: Vec<Value> = moviebox_tui::service::caption_options(&payload)
                 .into_iter()
@@ -264,6 +337,17 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if url.is_empty() {
                 return Err("missing url".into());
             }
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            use std::hash::{Hash, Hasher};
+            url.hash(&mut hasher);
+            // Try hash with common extensions first to avoid re-download
+            for ext in ["jpg", "png", "webp", "img"] {
+                let name = format!("{:016x}.{}", hasher.finish(), ext);
+                let path = poster_dir().join(&name);
+                if path.exists() {
+                    return Ok(json!({ "path": path.to_string_lossy().to_string() }));
+                }
+            }
             let bytes = svc
                 .fetch_poster_bytes(&url)
                 .await
@@ -271,13 +355,42 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
             if bytes.is_empty() {
                 return Err("poster download returned no data".into());
             }
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            use std::hash::{Hash, Hasher};
-            url.hash(&mut hasher);
-            let name = format!("{:016x}.{}", hasher.finish(), detect_ext(&bytes));
+            let mut hasher2 = std::collections::hash_map::DefaultHasher::new();
+            url.hash(&mut hasher2);
+            let name = format!("{:016x}.{}", hasher2.finish(), detect_ext(&bytes));
             let path = poster_dir().join(name);
             std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
             Ok(json!({ "path": path.to_string_lossy().to_string() }))
+        }
+
+        "homepage" | "discover" | "home" => {
+            let tab = str_arg(req, "tab");
+            let tab_id = if tab.is_empty() { "2" } else { tab.as_str() };
+            let page = usz_arg(req, "page", 1).max(1);
+            let per_page = usz_arg(req, "perPage", 24).clamp(1, 50);
+            let raw = if let Some(cached) = moviebox_tui::cache::get_homepage_cache(tab_id, page) {
+                cached
+            } else {
+                let _ = svc.client.init().await;
+                let fetched = svc.homepage(tab_id, page).await?;
+                moviebox_tui::cache::set_homepage_cache(tab_id, page, &fetched);
+                fetched
+            };
+            let mut subjects = unwrap_homepage_subjects(&raw);
+            // dedupe by id
+            let mut seen = std::collections::HashSet::new();
+            let mut uniq: Vec<Value> = Vec::new();
+            for subj in subjects.drain(..) {
+                let id = subject_id(subj.get("subjectId").or_else(|| subj.get("id")).unwrap_or(&Value::Null)).unwrap_or_default();
+                if id.is_empty() || seen.contains(&id) { continue; }
+                seen.insert(id);
+                uniq.push(subj);
+            }
+            // Shuffle-like: take first per_page after simple deterministic shuffle based on hash
+            // For true random, QML will shuffle; here just limit
+            let limited = uniq.into_iter().take(per_page * 3).collect::<Vec<_>>();
+            let items: Vec<Value> = limited.iter().map(normalize_search_item).filter(|v| v.get("id").and_then(|id| id.as_str()).map(|s| !s.is_empty()).unwrap_or(false)).take(per_page).collect();
+            Ok(json!({ "items": items, "rawCount": limited.len() }))
         }
 
         "raw" => {
@@ -314,11 +427,6 @@ async fn main() {
             return;
         }
     };
-
-    let needs_token = matches!(req.cmd.as_str(), "suggest" | "search" | "details" | "resources" | "captions");
-    if needs_token {
-        let _ = service().client.init().await;
-    }
 
     let data = run(&req.cmd, &req.rest).await;
     let resp = match data {

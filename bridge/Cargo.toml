@@ -1,6 +1,6 @@
 [package]
 name = "omamovie-bridge"
-version = "1.5.7"
+version = "1.5.8"
 edition = "2021"
 description = "JSON/CLI bridge exposing the moviebox-tui engine to the OmaMovie Omarchy UI"
 

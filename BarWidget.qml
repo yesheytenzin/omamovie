@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -7,34 +6,49 @@ BarWidget {
     id: root
     moduleName: "tenzin.omamovie"
 
-    readonly property string launchScript: Qt.resolvedUrl("moviebox-launch.sh").replace(/^file:\/\//, "")
-    property bool checking: true
-    property bool installed: false
+    visible: true
+    implicitWidth: button.implicitWidth
+    implicitHeight: button.implicitHeight
 
-    function refresh() {
-        root.checking = true
-        checkProc.command = ["bash", "-lc", "command -v moviebox-tui >/dev/null 2>&1"]
-        checkProc.running = true
+    readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+
+    function injectPanel() {
+        var target = panelLoader.item;
+        if (!target) return;
+        if ("bar" in target) target.bar = root.bar;
+        if ("settings" in target) target.settings = root.settings;
+        if ("anchorItem" in target) target.anchorItem = button;
+        if ("hostWidget" in target) target.hostWidget = root;
     }
 
-    function launch() {
-        if (root.checking || launchProc.running) return
-        launchProc.command = ["bash", root.launchScript]
-        launchProc.running = true
+    function togglePanel() {
+        if (panelLoader.item && panelLoader.item.toggle)
+            panelLoader.item.toggle();
+    }
+    function open() {
+        if (panelLoader.item && panelLoader.item.openFromHotkey)
+            panelLoader.item.openFromHotkey();
+    }
+    function close() {
+        if (panelLoader.item && panelLoader.item.close)
+            panelLoader.item.close();
+    }
+    function closeForPopoutSwitch() {
+        if (panelLoader.item && panelLoader.item.closeForPopoutSwitch)
+            panelLoader.item.closeForPopoutSwitch();
     }
 
-    Process {
-        id: checkProc
-        onExited: function(exitCode) {
-            root.installed = exitCode === 0
-            root.checking = false
-        }
-    }
+    onBarChanged: injectPanel()
+    onSettingsChanged: injectPanel()
 
-    Process {
-        id: launchProc
-        onExited: function(exitCode) {
-            if (exitCode !== 0) root.refresh()
+    Loader {
+        id: panelLoader
+        active: true
+        source: Qt.resolvedUrl("Panel.qml")
+        visible: false
+        onLoaded: {
+            root.injectPanel();
+            Qt.callLater(root.injectPanel);
         }
     }
 
@@ -44,11 +58,7 @@ BarWidget {
         bar: root.bar
         text: "\uf03d"
         slotSize: Style.bar.statusSlot
-        tooltipText: root.checking ? "MovieBox \u2026" :
-                     (root.installed ? "MovieBox \u2022 click to open" :
-                                       "MovieBox \u2022 not installed \u2022 click to install & open")
-        onPressed: root.launch()
+        tooltipText: "OmaMovie \u2022 search, browse and watch movies, shows and anime in mpv"
+        onPressed: root.togglePanel()
     }
-
-    Component.onCompleted: root.refresh()
 }

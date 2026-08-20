@@ -48,39 +48,31 @@ if [[ -x "$INSTALL_DIR/$BIN" && -f "$VERSION_FILE" && $(<"$VERSION_FILE") == "$V
   exit 0
 fi
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-ARCHIVE="OmaMovie_Linux_${ARCH}.tar.gz"
-
-say "downloading $ARCHIVE ..."
-# Download with progress for widget percentage (PROGRESS:NN to stdout, parsed by BarWidget)
-if command -v stdbuf >/dev/null 2>&1; then
-  # Use --progress-bar and translate carriage returns to newlines for parsing
-  set +e
-  curl -fL --retry 3 --progress-bar -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE" 2>&1 | stdbuf -oL tr '\r' '\n' | while IFS= read -r line; do
-    if [[ "$line" =~ ([0-9]+)% ]]; then
-      echo "PROGRESS:${BASH_REMATCH[1]}"
-    fi
-  done
-  curl_status=${PIPESTATUS[0]}
-  set -e
-  if (( curl_status != 0 )); then
-    fail "download failed (curl exit $curl_status)"
-  fi
+PREBUILT_DIR="$DIR/prebuilt/$ARCH"
+if [[ -x "$PREBUILT_DIR/$BIN" && -f "$PREBUILT_DIR/version" && $(<"$PREBUILT_DIR/version") == "$VERSION" ]]; then
+  say "bridge $VERSION found in git (prebuilt/$ARCH) - installing locally"
+  install -m 0755 "$PREBUILT_DIR/$BIN" "$INSTALL_DIR/$BIN.new"
+  mv -f "$INSTALL_DIR/$BIN.new" "$INSTALL_DIR/$BIN"
+  printf '%s\n' "$VERSION" >"$VERSION_FILE.new"
+  mv -f "$VERSION_FILE.new" "$VERSION_FILE"
+  say "installed $INSTALL_DIR/$BIN"
 else
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  say "prebuilt bridge not found - downloading $ARCHIVE ..."
   curl -fsSL --retry 3 -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE" || fail "download failed"
-fi
-curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
-(cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet) ||
-  fail "release checksum verification failed"
+  curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
+  (cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet) ||
+    fail "release checksum verification failed"
 
-tar -xzf "$TMP/$ARCHIVE" -C "$TMP"
-[[ -x "$TMP/$BIN" ]] || fail "$BIN was not found in the release archive"
-install -m 0755 "$TMP/$BIN" "$INSTALL_DIR/$BIN.new"
-mv -f "$INSTALL_DIR/$BIN.new" "$INSTALL_DIR/$BIN"
-printf '%s\n' "$VERSION" >"$VERSION_FILE.new"
-mv -f "$VERSION_FILE.new" "$VERSION_FILE"
-say "installed $INSTALL_DIR/$BIN"
+  tar -xzf "$TMP/$ARCHIVE" -C "$TMP"
+  [[ -x "$TMP/$BIN" ]] || fail "$BIN was not found in the release archive"
+  install -m 0755 "$TMP/$BIN" "$INSTALL_DIR/$BIN.new"
+  mv -f "$INSTALL_DIR/$BIN.new" "$INSTALL_DIR/$BIN"
+  printf '%s\n' "$VERSION" >"$VERSION_FILE.new"
+  mv -f "$VERSION_FILE.new" "$VERSION_FILE"
+  say "installed $INSTALL_DIR/$BIN"
+fi
 
 if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then
   say "bridge OK"

@@ -35,6 +35,10 @@ record_plugin_revision() {
   fi
 }
 
+LOCK_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/omamovie/setup.lock"
+exec 9>"$LOCK_FILE"
+flock -w 180 9 || { warn "another install is already running"; exit 0
+}
 # No explicit rescan - rely on omarchy plugin manager's rescan and file watcher (single reload)
 
 if [[ -x "$INSTALL_DIR/$BIN" && -f "$VERSION_FILE" && $(<"$VERSION_FILE") == "$VERSION" ]]; then
@@ -49,7 +53,23 @@ trap 'rm -rf "$TMP"' EXIT
 ARCHIVE="OmaMovie_Linux_${ARCH}.tar.gz"
 
 say "downloading $ARCHIVE ..."
-curl -fsSL --retry 3 -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE"
+# Download with progress for widget percentage (PROGRESS:NN to stdout, parsed by BarWidget)
+if command -v stdbuf >/dev/null 2>&1; then
+  # Use --progress-bar and translate carriage returns to newlines for parsing
+  set +e
+  curl -fL --retry 3 --progress-bar -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE" 2>&1 | stdbuf -oL tr '\r' '\n' | while IFS= read -r line; do
+    if [[ "$line" =~ ([0-9]+)% ]]; then
+      echo "PROGRESS:${BASH_REMATCH[1]}"
+    fi
+  done
+  curl_status=${PIPESTATUS[0]}
+  set -e
+  if (( curl_status != 0 )); then
+    fail "download failed (curl exit $curl_status)"
+  fi
+else
+  curl -fsSL --retry 3 -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE" || fail "download failed"
+fi
 curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
 (cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet) ||
   fail "release checksum verification failed"

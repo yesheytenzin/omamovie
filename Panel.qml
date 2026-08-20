@@ -653,20 +653,9 @@ Panel {
             Layout.preferredHeight: {
                 if (root.view === "player" && root.playerFullscreen) return Math.round(panel.screenH * 0.78);
                 if (root.view === "player") return 460;
-                if (root.view === "home") {
-                    if (homeGrid.contentHeight === 0) return Math.round(Math.min(460, panel.screenH * 0.52));
-                    return Math.round(Math.min(Math.max(360, homeGrid.contentHeight + 16), panel.screenH * 0.64));
-                }
-                if (root.view === "grid") {
-                    if (grid.contentHeight === 0) return 360;
-                    return Math.round(Math.min(Math.max(360, grid.contentHeight + 8), panel.screenH * 0.64));
-                }
-                if (root.view === "details") {
-                    return Math.round(Math.min(Math.max(400, detailsContent.implicitHeight + 20), panel.screenH * 0.70));
-                }
-                return 360;
-            }
-            Layout.fillHeight: false
+                // Uniform height for home/grid/details prevents panel resize jumps
+                return Math.round(Math.min(Math.max(400, panel.screenH * 0.64), panel.screenH * 0.72));
+            }            Layout.fillHeight: false
             clip: true
 
             // ---- home (discover) ----

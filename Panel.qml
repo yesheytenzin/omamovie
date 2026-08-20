@@ -323,8 +323,9 @@ Panel {
     }
 
     function play() {
-        // Default Play now uses embedded player for instant in-UI playback.
-        root.playEmbedded();
+        // Only mkv (mpv) — embedded view removed per request
+        root.playExternal();
+        Qt.callLater(function(){ if (root.playing) root.close(); });
     }
 
     function playEmbedded() {
@@ -379,6 +380,8 @@ Panel {
         mpvProc.running = true;
         root.playing = true;
         root.statusText = "Playing in mpv" + subLabel + " \u2022 close the player to stop";
+        // auto-close panel when external player starts
+        Qt.callLater(function(){ root.close(); });
     }
 
     Process {
@@ -525,7 +528,7 @@ Panel {
         owner: root.barIdentity
         bar: root.bar
         open: root.opened
-        centerOnBar: !root.playerFullscreen
+        centerOnBar: true
         margin: root.playerFullscreen && root.view === "player" ? 0 : Style.gapsOut
         gap: root.playerFullscreen && root.view === "player" ? 0 : Style.gapsOut
         // Responsive breakpoints: <1366 small 96%/90%, 1366-1920 medium 88%/82% cap 1100, >1920 large 80%/78% cap 1400
@@ -586,9 +589,9 @@ Panel {
             Button {
                 text: "✕"
                 tooltipText: "Close"
-                fontSize: Style.font.caption
-                horizontalPadding: 8
-                verticalPadding: 4
+                fontSize: Style.font.body
+                horizontalPadding: 12
+                verticalPadding: 6
                 onClicked: root.close()
             }
         }
@@ -1080,16 +1083,10 @@ Panel {
                                 color: Qt.darker(Color.foreground, 1.4)
                             }
                             Button {
-                                text: "\u25B6 Play here"
+                                text: "\u25B6 Play"
                                 selected: true
-                                enabled: root.selStream >= 0 && !root.embeddedPlaying
-                                onClicked: root.playEmbedded()
-                            }
-                            Button {
-                                text: "mpv"
-                                tooltipText: "Open in mpv (with subtitles)"
                                 enabled: root.selStream >= 0 && !root.playing
-                                onClicked: root.playExternal()
+                                onClicked: { root.playExternal(); root.close(); }
                             }
                         }
                     }
@@ -1129,7 +1126,9 @@ Panel {
                         Button {
                             text: "X"
                             tooltipText: "Close"
-                            fontSize: Style.font.caption
+                            fontSize: Style.font.body
+                            horizontalPadding: 10
+                            verticalPadding: 5
                             onClicked: root.close()
                         }
                     }

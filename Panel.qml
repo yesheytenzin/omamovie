@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -955,14 +956,15 @@ Panel {
                                 else embeddedPlayer.play();
                             }
                         }
-                        Slider {
+                        PanelSlider {
                             id: playerSlider
                             Layout.fillWidth: true
-                            from: 0
-                            to: embeddedPlayer.duration > 0 ? embeddedPlayer.duration : 1
+                            bar: root.bar
+                            minimum: 0
+                            maximum: embeddedPlayer.duration > 0 ? embeddedPlayer.duration : 1
                             value: embeddedPlayer.position
                             enabled: embeddedPlayer.seekable
-                            onMoved: embeddedPlayer.setPosition(value)
+                            onMoved: function(v) { embeddedPlayer.position = v; }
                         }
                         Text {
                             text: {

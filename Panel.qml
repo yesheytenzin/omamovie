@@ -350,27 +350,12 @@ Panel {
         var s = root.streams[root.selStream];
         var link = s.resourceLink || s.link || "";
         if (!link) { root.statusText = "Stream has no URL"; return; }
-
-        root.busy = true;
-        root.busyLabel = "Resolving stream \u2026";
+        // Fast path: launch mpv immediately without waiting for captions
+        root._launch(["mpv", "--force-window=immediate", "--no-terminal", "--cache=yes", "--demuxer-max-bytes=50M"], link, "");
+        // Fetch captions in background for next time (cached)
         request("captions", { id: root.currentId, rid: String(s.resourceId || "") }, function(resp) {
-            root.busy = false;
             var opts = (resp && resp.ok && resp.options) ? resp.options : [];
-            var withUrl = opts.filter(function(o) { return o.url; });
-            root.subs = withUrl;
-            if (root.subs.length > 0) {
-                var sub = root.subs[0];
-                root.busy = true;
-                root.busyLabel = "Downloading subtitles \u2026";
-                request("subfile", { url: sub.url, headers: [] }, function(sr) {
-                    root.busy = false;
-                    var args = ["mpv", "--force-window=immediate", "--no-terminal"];
-                    if (sr && sr.ok && sr.path) args.push("--sub-file=" + sr.path);
-                    root._launch(args, link, (sr && sr.ok && sr.path) ? " with \u201C" + sub.name + "\u201D subs" : "");
-                });
-            } else {
-                root._launch(["mpv", "--force-window=immediate", "--no-terminal"], link, "");
-            }
+            if (opts.length) root.subs = opts.filter(function(o){ return o.url; });
         });
     }
 
@@ -452,6 +437,22 @@ Panel {
 
     function backToGrid() {
         root.view = "grid";
+    }
+
+    function refreshCurrent() {
+        if (root.view === "home") root.loadHome(true);
+        else if (root.view === "grid") root.doSearch();
+        else if (root.view === "details" && root.currentId) {
+            // reload details and streams for current item
+            var idx = -1;
+            for (var i=0;i<resultModel.count;i++) if (resultModel.get(i).id===root.currentId) { idx=i; break; }
+            if (idx>=0) root.openDetails(idx);
+            else {
+                for (var j=0;j<homeModel.count;j++) if (homeModel.get(j).id===root.currentId) { idx=j; break; }
+                if (idx>=0) root.openHomeDetails(idx);
+                else root.loadHome(true);
+            }
+        } else root.loadHome(true);
     }
 
     function stopEmbedded() {
@@ -585,6 +586,14 @@ Panel {
                     font.family: Style.font.family; font.pixelSize: Style.font.caption - 1; color: Qt.darker(Color.foreground, 1.35)
                     elide: Text.ElideRight; Layout.fillWidth: true; maximumLineCount: 1
                 }
+            }
+            Button {
+                text: "\u21bb"
+                tooltipText: "Refresh"
+                fontSize: Style.font.body
+                horizontalPadding: 10
+                verticalPadding: 5
+                onClicked: root.refreshCurrent()
             }
             Button {
                 text: "✕"
@@ -721,8 +730,7 @@ Panel {
                                     border.width: homeDelegate.hovered ? 1 : 0
                                     border.color: homeDelegate.hovered ? Color.accent : "transparent"
                                     clip: true
-                                    scale: homeDelegate.hovered ? 1.02 : 1.0
-                                    Behavior on scale { NumberAnimation { duration: 140 } }
+                                    // hover scale removed
                                     Image {
                                         anchors.fill: parent
                                         source: model.cover || model.coverPath || ""
@@ -810,7 +818,7 @@ Panel {
                 visible: root.view === "grid"
                 model: resultModel
                 clip: true
-                cacheBuffer: 400
+                cacheBuffer: 600
                 flickableDirection: Flickable.VerticalFlick
                 boundsBehavior: Flickable.StopAtBounds
                 maximumFlickVelocity: 4000
@@ -834,9 +842,8 @@ Panel {
                             border.width: gridDelegate.hovered ? 1 : 0
                             border.color: gridDelegate.hovered ? Color.accent : "transparent"
                             clip: true
-                            scale: gridDelegate.hovered ? 1.02 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                            Behavior on border.width { NumberAnimation { duration: 120 } }
+                            // hover scale removed for scroll performance
+                            Behavior on border.width { NumberAnimation { duration: 100 } }
                             Image {
                                 anchors.fill: parent
                                 source: model.cover || model.coverPath || ""
@@ -957,7 +964,7 @@ Panel {
                             Button {
                                 text: "\u2190 Back"
                                 fontSize: Style.font.caption
-                                onClicked: root.backToGrid()
+                                onClicked: root.goHome()
                             }
                         }
 
@@ -1121,7 +1128,7 @@ Panel {
                         Button {
                             text: "\u2190 Back"
                             fontSize: Style.font.caption
-                            onClicked: { root.stopEmbedded(); root.view = "details"; root.playerFullscreen = false; }
+                            onClicked: { root.stopEmbedded(); root.goHome(); root.playerFullscreen = false; }
                         }
                         Button {
                             text: "X"

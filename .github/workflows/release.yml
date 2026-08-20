@@ -36,6 +36,37 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
+  commit-prebuilt:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: OmaMovie_Linux_*.tar.gz
+          merge-multiple: true
+          path: artifacts
+      - name: Stage prebuilt binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p "prebuilt/x64" "prebuilt/arm64"
+          tar -xzf "artifacts/OmaMovie_Linux_x64.tar.gz" -C "prebuilt/x64"
+          tar -xzf "artifacts/OmaMovie_Linux_arm64.tar.gz" -C "prebuilt/arm64"
+          chmod +x "prebuilt/x64/omamovie-bridge" "prebuilt/arm64/omamovie-bridge"
+          printf '%s\n' "$VERSION" > "prebuilt/x64/version"
+          printf '%s\n' "$VERSION" > "prebuilt/arm64/version"
+      - name: Commit and push prebuilt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prebuilt
+          git commit -m "Ship prebuilt omamovie-bridge v${GITHUB_REF_NAME#v}" || echo "nothing to commit"
+          git push origin main
+
   release:
     needs: build
     runs-on: ubuntu-24.04

@@ -26,11 +26,11 @@ Add and enable the plugin:
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-That single command clones the plugin, enables its bar widget, downloads the
+That single command clones the plugin (bridge binary already included in git), enables its bar widget, installs the
 matching prebuilt bridge, verifies `SHA256SUMS`, and stores it privately under
 `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. The Omarchy shell
 restarts automatically as soon as installation finishes. Click the bar icon;
-if you click during the brief first-run download, the panel opens by itself
+if you click during the brief first-run install, the panel opens by itself
 once installation completes.
 
 Click the **movie** icon in the bar (󰨂): search, pick a title, choose a
@@ -44,7 +44,7 @@ omarchy plugin update tenzin.omamovie
 ```
 
 The Omarchy shell restarts automatically after each actual update. If
-`manifest.json` has a new version, the matching release bridge is downloaded
+`manifest.json` has a new version, the matching prebuilt bridge ships in git (`prebuilt/`); a release download is kept as fallback
 automatically.
 
 ## Remove
@@ -91,7 +91,7 @@ omamovie/
   manifest.json          # bar-widget metadata (id tenzin.omamovie)
   BarWidget.qml          # bar icon -> panel
   Panel.qml              # the OmaMovie UI (search/grid/details/play)
-  omamovie-setup.sh      # downloads + verifies the release bridge
+  omamovie-setup.sh      # installs prebuilt bridge; release download as fallback
   bridge/
     Cargo.toml           # pins moviebox-tui (rev 90acb82c)
     src/main.rs          # JSON bridge over the upstream engine

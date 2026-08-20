@@ -16,8 +16,7 @@
     "description": "OmaMovie",
     "category": "Media",
     "allowMultiple": false,
-    "defaultSection": "right",
-    "defaults": {},
-    "schema": []
-  }
+    "defaultSection": "right"
+  },
+  "license": "MIT"
 }

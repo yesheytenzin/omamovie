@@ -1,4 +1,4 @@
-# Omarchy MovieBox TUI
+# Omarchy OmaMovie
 
 One-click launcher for [MovieBox-TUI](https://github.com/mesamirh/MovieBox-Tui)
 from your Omarchy bar: a lightweight terminal client that searches, streams
@@ -11,16 +11,16 @@ no scraping code; all functionality comes from MovieBox-TUI itself.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/yesheytenzin/moviebox-tui.git --enable --yes
+omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable --yes
 # or local path while developing
-omarchy plugin add /home/tenzin/plugins/moviebox-tui --enable --yes
+omarchy plugin add /home/tenzin/plugins/omamovie --enable --yes
 omarchy-shell shell rescanPlugins
 ```
 
 The widget appears in the **right** section. Move it:
 
 ```bash
-omarchy bar move tenzin.moviebox-tui --section left
+omarchy bar move tenzin.omamovie --section left
 ```
 
 First click installs `moviebox-tui` to `~/.local/bin` (official GitHub release,
@@ -49,7 +49,7 @@ omarchy pkg add mpv
 ## Uninstall
 
 ```bash
-omarchy plugin remove tenzin.moviebox-tui --yes
+omarchy plugin remove tenzin.omamovie --yes
 rm -f ~/.local/bin/moviebox-tui   # optional: also drop the binary
 ```
 

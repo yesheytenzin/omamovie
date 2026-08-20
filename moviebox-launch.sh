@@ -8,7 +8,7 @@ if ! command -v moviebox-tui >/dev/null 2>&1; then
   if ! "$DIR/moviebox-setup.sh"; then
     if command -v notify-send >/dev/null 2>&1; then
       notify-send -a moviebox "MovieBox-TUI install failed" \
-        "Run ~/.config/omarchy/plugins/tenzin.moviebox-tui/moviebox-setup.sh in a terminal for details."
+        "Run ~/.config/omarchy/plugins/tenzin.omamovie/moviebox-setup.sh in a terminal for details."
     fi
     exit 1
   fi

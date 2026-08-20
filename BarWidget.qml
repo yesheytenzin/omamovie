@@ -5,7 +5,7 @@ import qs.Ui
 
 BarWidget {
     id: root
-    moduleName: "tenzin.moviebox-tui"
+    moduleName: "tenzin.omamovie"
 
     readonly property string launchScript: Qt.resolvedUrl("moviebox-launch.sh").replace(/^file:\/\//, "")
     property bool checking: true

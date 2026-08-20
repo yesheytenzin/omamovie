@@ -536,11 +536,12 @@ Panel {
                       : isSmallScreen ? panel.fittedContentWidth(panel.screenW * 0.96)
                       : isLargeScreen ? panel.fittedContentWidth(Math.min(panel.screenW * 0.80, 1400))
                       : panel.fittedContentWidth(Math.min(panel.screenW * 0.88, 1100))
+        // Fixed height - every view (home/grid/details/player) gets the same size
         contentHeight: root.playerFullscreen && root.view === "player"
                        ? panel.screenH
-                       : isSmallScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.92)
-                       : isLargeScreen ? panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.84)
-                       : panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.88)
+                       : isSmallScreen ? panel.fittedContentHeight(panel.screenH * 0.84, panel.screenH * 0.92)
+                       : isLargeScreen ? panel.fittedContentHeight(panel.screenH * 0.72, panel.screenH * 0.84)
+                       : panel.fittedContentHeight(panel.screenH * 0.78, panel.screenH * 0.88)
 
         ColumnLayout {
             id: mainColumn
@@ -646,16 +647,12 @@ Panel {
             }
         }
 
-        // body — responsive, no empty space below
+        // body — fills the fixed panel; same size on every view
         Item {
             id: body
             Layout.fillWidth: true
-            Layout.preferredHeight: {
-                if (root.view === "player" && root.playerFullscreen) return Math.round(panel.screenH * 0.78);
-                if (root.view === "player") return 460;
-                // Uniform height for home/grid/details prevents panel resize jumps
-                return Math.round(Math.min(Math.max(400, panel.screenH * 0.64), panel.screenH * 0.72));
-            }            Layout.fillHeight: false
+            Layout.fillHeight: true
+            Layout.minimumHeight: Math.round(Math.min(Math.max(300, panel.screenH * 0.52), panel.screenH * 0.60))
             clip: true
 
             // ---- home (discover) ----

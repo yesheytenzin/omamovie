@@ -33,6 +33,8 @@ Panel {
     property bool busy: false
     property string busyLabel: ""
     property string statusText: "Search movies, shows and anime"
+    property string query: ""
+    property var results: []
     property bool playing: false
 
     readonly property bool isSeries: root.details ? (root.details.subjectType === 2 || root.seasons.length > 0) : false
@@ -61,6 +63,7 @@ Panel {
 
     Process {
         id: bridgeProc
+        property string collected: ""
         stdout: SplitParser {
             onRead: function(data) { bridgeProc.collected += data }
         }

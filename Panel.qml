@@ -13,7 +13,7 @@ Panel {
     property var hostWidget: null
     readonly property var barIdentity: hostWidget || root
 
-    readonly property string bridge: Quickshell.env("HOME") + "/.local/bin/omamovie-bridge"
+    readonly property string bridge: Qt.resolvedUrl(".runtime/omamovie-bridge").toString().replace(/^file:\/\//, "")
 
     implicitWidth: 820
     implicitHeight: 560

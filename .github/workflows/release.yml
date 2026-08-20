@@ -1,0 +1,85 @@
+name: Release bridge
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            asset: OmaMovie_Linux_x64.tar.gz
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: OmaMovie_Linux_arm64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build bridge
+        run: cargo build --release --locked --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
+      - name: Package bridge
+        run: |
+          strip "bridge/target/${{ matrix.target }}/release/omamovie-bridge"
+          tar -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" omamovie-bridge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  commit-prebuilt:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: OmaMovie_Linux_*.tar.gz
+          merge-multiple: true
+          path: artifacts
+      - name: Stage prebuilt binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p "prebuilt/x64" "prebuilt/arm64"
+          tar -xzf "artifacts/OmaMovie_Linux_x64.tar.gz" -C "prebuilt/x64"
+          tar -xzf "artifacts/OmaMovie_Linux_arm64.tar.gz" -C "prebuilt/arm64"
+          chmod +x "prebuilt/x64/omamovie-bridge" "prebuilt/arm64/omamovie-bridge"
+          printf '%s\n' "$VERSION" > "prebuilt/x64/version"
+          printf '%s\n' "$VERSION" > "prebuilt/arm64/version"
+      - name: Commit and push prebuilt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prebuilt
+          git commit -m "Ship prebuilt omamovie-bridge v${GITHUB_REF_NAME#v}" || echo "nothing to commit"
+          git push origin main
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: OmaMovie_Linux_*.tar.gz
+          merge-multiple: true
+      - name: Create checksums
+        run: sha256sum OmaMovie_Linux_*.tar.gz > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            OmaMovie_Linux_*.tar.gz
+            SHA256SUMS

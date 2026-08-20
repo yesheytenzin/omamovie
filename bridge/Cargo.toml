@@ -1,0 +1,15 @@
+[package]
+name = "omamovie-bridge"
+version = "1.5.19"
+edition = "2021"
+description = "JSON/CLI bridge exposing the moviebox-tui engine to the OmaMovie Omarchy UI"
+
+[dependencies]
+moviebox-tui = { git = "https://github.com/mesamirh/MovieBox-Tui", rev = "90acb82c6dad0659c199a80786c02130be4d65ca" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

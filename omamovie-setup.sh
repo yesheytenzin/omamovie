@@ -61,6 +61,16 @@ else
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
   say "prebuilt bridge not found - downloading $ARCHIVE ..."
+  # The release is CI-built after the v$VERSION tag is pushed; wait for it
+  # instead of failing on a transient 404 (the race the setup used to hit).
+  attempts=0
+  while ! curl -fsI --max-time 10 "$RELEASE_BASE/$ARCHIVE" >/dev/null 2>&1 \
+    || ! curl -fsI --max-time 10 "$RELEASE_BASE/SHA256SUMS" >/dev/null 2>&1; do
+    attempts=$((attempts + 1))
+    (( attempts <= 20 )) || fail "release v$VERSION is not published yet; try again later"
+    say "release v$VERSION still building - retry $attempts/20"
+    sleep 5
+  done
   curl -fsSL --retry 3 -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE" || fail "download failed"
   curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
   (cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet) ||

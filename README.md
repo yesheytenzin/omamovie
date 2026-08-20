@@ -21,7 +21,7 @@ omarchy pkg add mpv
 Add and enable the plugin:
 
 ```bash
-omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable --yes
+omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
 That single command clones the plugin, enables its bar widget, downloads the
@@ -36,7 +36,7 @@ picker; subtitles are downloaded automatically when available.
 ## Update
 
 ```bash
-omarchy plugin update tenzin.omamovie --yes
+omarchy plugin update tenzin.omamovie
 ```
 
 The shell reloads the updated widget. If `manifest.json` has a new version,
@@ -45,7 +45,7 @@ the matching release bridge is downloaded automatically.
 ## Remove
 
 ```bash
-omarchy plugin remove tenzin.omamovie --yes
+omarchy plugin remove tenzin.omamovie
 ```
 
 The private `.runtime/` directory and bridge are removed with the plugin.

@@ -46,6 +46,7 @@ Panel {
     property string playerUrl: ""
     property string playerTitle: ""
     property bool embeddedPlaying: false
+    property bool playerFullscreen: false
 
     readonly property bool isSeries: root.details ? (root.details.subjectType === 2 || root.seasons.length > 0) : false
 
@@ -384,6 +385,7 @@ Panel {
         }
         root.embeddedPlaying = false;
         root.playerUrl = "";
+        root.playerFullscreen = false;
     }
 
     // ---------------- open/close wiring (same contract as pacman) ----------------
@@ -395,7 +397,7 @@ Panel {
         });
     }
     function close() {
-        if (root.view === "player") root.stopEmbedded();
+        if (root.view === "player") { root.stopEmbedded(); root.playerFullscreen = false; }
         root.controller.hide();
     }
     function toggle() {
@@ -440,43 +442,67 @@ Panel {
         bar: root.bar
         open: root.opened
         centerOnBar: true
-        contentWidth: panel.fittedContentWidth(panel.screenW * 0.85)
-        contentHeight: panel.cappedContentHeight(panel.screenH * 0.85)
+        // Responsive: width capped at 1100, height fits content up to 88% screen — no empty space below
+        contentWidth: root.playerFullscreen && root.view === "player"
+                      ? Math.round(panel.screenW * 0.96)
+                      : panel.fittedContentWidth(Math.min(panel.screenW * 0.88, 1100))
+        contentHeight: root.playerFullscreen && root.view === "player"
+                       ? panel.cappedContentHeight(panel.screenH * 0.92)
+                       : panel.fittedContentHeight(mainColumn.implicitHeight, panel.screenH * 0.82)
 
         ColumnLayout {
+            id: mainColumn
             anchors.fill: parent
             anchors.margins: 14
             spacing: 10
 
-        // header
+        // header — refined, responsive
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
-            Text {
-                text: "\uf03d  OmaMovie"
-                font.family: Style.font.family
-                font.pixelSize: Style.font.title
-                font.bold: true
-                color: Color.accent
-            }
-            Item { Layout.fillWidth: true }
-            Text {
-                text: root.busy ? "\u23F3 " + root.busyLabel : (root.playing ? "\u25B6 playing \u2026" : "")
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-                color: Color.foreground
-                visible: root.busy || root.playing
+            spacing: Style.spacing.md
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                RowLayout {
+                    spacing: 8
+                    Text { text: "\uf03d"; font.family: Style.font.family; font.pixelSize: Style.font.title; color: Color.accent }
+                    Text { text: "OmaMovie"; font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true; color: Color.foreground }
+                    Rectangle { width: 1; height: 18; color: Color.foreground; opacity: 0.12; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+                    Text {
+                        text: root.view === "player" ? "Player" : root.view === "details" ? "Details" : root.view === "grid" ? "Results" : "Discover"
+                        font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; color: Qt.darker(Color.foreground, 1.25); font.capitalization: Font.AllUppercase
+                    }
+                    Item { Layout.fillWidth: true }
+                    // busy indicator inline
+                    RowLayout {
+                        spacing: 6; visible: root.busy || root.playing
+                        Rectangle { width: 8; height: 8; radius: 4; color: Color.accent; opacity: 0.9; visible: root.busy
+                            SequentialAnimation on opacity { running: root.busy; loops: Animation.Infinite; NumberAnimation { from: 0.4; to: 1.0; duration: 700 } NumberAnimation { from: 1.0; to: 0.4; duration: 700 } }
+                        }
+                        Text {
+                            text: root.busy ? root.busyLabel : "Playing"
+                            font.family: Style.font.family; font.pixelSize: Style.font.caption; color: Color.accent
+                        }
+                    }
+                }
+                Text {
+                    text: root.statusText
+                    font.family: Style.font.family; font.pixelSize: Style.font.caption - 1; color: Qt.darker(Color.foreground, 1.35)
+                    elide: Text.ElideRight; Layout.fillWidth: true; maximumLineCount: 1
+                }
             }
             Button {
-                text: "X"
+                text: "✕"
                 tooltipText: "Close"
                 fontSize: Style.font.caption
-                horizontalPadding: 6
+                horizontalPadding: 8
+                verticalPadding: 4
                 onClicked: root.close()
             }
         }
+        PanelSeparator { Layout.fillWidth: true; opacity: 0.5 }
 
-        // search row
+        // search — prominent, rounded
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -486,6 +512,8 @@ Panel {
                 placeholderText: "Search movies, shows, anime \u2026"
                 onAccepted: root.doSearch()
                 onTextChanged: root.debounceSuggest()
+                // clear on Esc
+                Keys.onEscapePressed: { clear(); suggestionModel.clear(); }
             }
             Button {
                 text: "Search"
@@ -495,32 +523,50 @@ Panel {
             }
             Button {
                 text: "Home"
+                iconText: "\uf015"
                 onClicked: root.goHome()
             }
         }
 
-        // suggestion chips
+        // suggestions — pill chips
         Flow {
             Layout.fillWidth: true
             spacing: 6
-            Layout.preferredHeight: Math.min(suggestionModel.count, 2) * 26 + (suggestionModel.count ? 6 : 0)
+            Layout.preferredHeight: suggestionModel.count ? Math.min(suggestionModel.count, 2) * 28 + 6 : 0
             visible: suggestionModel.count > 0
             Repeater {
                 model: suggestionModel
                 Button {
                     text: model.name
                     fontSize: Style.font.caption
-                    horizontalPadding: 8
-                    verticalPadding: 3
+                    horizontalPadding: 10
+                    verticalPadding: 4
                     onClicked: { searchField.text = model.name; root.doSearch(); }
                 }
             }
         }
 
-        // body
+        // body — responsive, no empty space below
         Item {
+            id: body
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: {
+                if (root.view === "player" && root.playerFullscreen) return Math.round(panel.screenH * 0.72);
+                if (root.view === "player") return 420;
+                if (root.view === "home") {
+                    if (homeGrid.contentHeight === 0) return Math.round(Math.min(420, panel.screenH * 0.48));
+                    return Math.round(Math.min(Math.max(340, homeGrid.contentHeight + 16), panel.screenH * 0.58));
+                }
+                if (root.view === "grid") {
+                    if (grid.contentHeight === 0) return 320;
+                    return Math.round(Math.min(Math.max(340, grid.contentHeight + 8), panel.screenH * 0.58));
+                }
+                if (root.view === "details") {
+                    return Math.round(Math.min(Math.max(380, detailsContent.implicitHeight + 20), panel.screenH * 0.62));
+                }
+                return 340;
+            }
+            Layout.fillHeight: false
             clip: true
 
             // ---- home (discover) ----
@@ -559,8 +605,10 @@ Panel {
                         cellWidth: 168
                         cellHeight: 236
                         delegate: Item {
+                            id: homeDelegate
                             width: homeGrid.cellWidth
                             height: homeGrid.cellHeight
+                            property bool hovered: homeMouse.containsMouse
                             Column {
                                 anchors.fill: parent
                                 anchors.margins: 6
@@ -569,8 +617,12 @@ Panel {
                                     width: parent.width
                                     height: parent.height * 0.74
                                     radius: Style.cornerRadius
-                                    color: Qt.darker(Color.foreground, 2.2)
+                                    color: Color.surface ?? Qt.darker(Color.foreground, 2.15)
+                                    border.width: homeDelegate.hovered ? 1 : 0
+                                    border.color: homeDelegate.hovered ? Color.accent : "transparent"
                                     clip: true
+                                    scale: homeDelegate.hovered ? 1.02 : 1.0
+                                    Behavior on scale { NumberAnimation { duration: 140 } }
                                     Image {
                                         anchors.fill: parent
                                         source: model.cover || model.coverPath || ""
@@ -578,6 +630,11 @@ Panel {
                                         visible: source !== ""
                                         asynchronous: true
                                         cache: true
+                                    }
+                                    Rectangle {
+                                        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                                        height: 22; color: "#66000000"; visible: model.rating && model.rating !== "-"
+                                        Text { anchors.centerIn: parent; text: "\u2605 " + model.rating; font.family: Style.font.family; font.pixelSize: 10; color: "white"; font.bold: true}
                                     }
                                     Text {
                                         anchors.centerIn: parent
@@ -607,8 +664,10 @@ Panel {
                                 }
                             }
                             MouseArea {
+                                id: homeMouse
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
+                                hoverEnabled: true
                                 onClicked: root.openHomeDetails(index)
                             }
                         }
@@ -646,8 +705,10 @@ Panel {
                 cellWidth: 168
                 cellHeight: 236
                 delegate: Item {
+                    id: gridDelegate
                     width: grid.cellWidth
                     height: grid.cellHeight
+                    property bool hovered: gridMouse.containsMouse
                     Column {
                         anchors.fill: parent
                         anchors.margins: 6
@@ -656,8 +717,13 @@ Panel {
                             width: parent.width
                             height: parent.height * 0.74
                             radius: Style.cornerRadius
-                            color: Qt.darker(Color.foreground, 2.2)
+                            color: Color.surface ?? Qt.darker(Color.foreground, 2.15)
+                            border.width: gridDelegate.hovered ? 1 : 0
+                            border.color: gridDelegate.hovered ? Color.accent : "transparent"
                             clip: true
+                            scale: gridDelegate.hovered ? 1.02 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                            Behavior on border.width { NumberAnimation { duration: 120 } }
                             Image {
                                 anchors.fill: parent
                                 source: model.cover || model.coverPath || ""
@@ -665,6 +731,18 @@ Panel {
                                 visible: source !== ""
                                 asynchronous: true
                                 cache: true
+                            }
+                            // subtle gradient + rating badge
+                            Rectangle {
+                                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                                height: 22; radius: 0
+                                visible: model.rating && model.rating !== "-"
+                                color: "#66000000"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\u2605 " + model.rating
+                                    font.family: Style.font.family; font.pixelSize: 10; color: "white"; font.bold: true
+                                }
                             }
                             Text {
                                 anchors.centerIn: parent
@@ -694,8 +772,10 @@ Panel {
                         }
                     }
                     MouseArea {
+                        id: gridMouse
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
+                        hoverEnabled: true
                         onClicked: root.openDetails(index)
                     }
                 }
@@ -736,6 +816,7 @@ Panel {
 
                     // info column
                     ColumnLayout {
+                        id: detailsContent
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         spacing: 8
@@ -913,9 +994,15 @@ Panel {
                             color: Color.foreground
                         }
                         Button {
+                            text: root.playerFullscreen ? "\u00D7 Full" : "\u26F6 Full"
+                            tooltipText: root.playerFullscreen ? "Exit fullscreen" : "Fullscreen"
+                            fontSize: Style.font.caption
+                            onClicked: root.playerFullscreen = !root.playerFullscreen
+                        }
+                        Button {
                             text: "\u2190 Back"
                             fontSize: Style.font.caption
-                            onClicked: { root.stopEmbedded(); root.view = "details"; }
+                            onClicked: { root.stopEmbedded(); root.view = "details"; root.playerFullscreen = false; }
                         }
                         Button {
                             text: "X"

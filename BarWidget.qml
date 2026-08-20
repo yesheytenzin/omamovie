@@ -28,9 +28,11 @@ BarWidget {
         setupProc.running = true;
     }
 
-    function shellRescan() {
-        rescanProc.command = ["/usr/share/omarchy/bin/omarchy-shell", "shell", "rescanPlugins"];
-        rescanProc.running = true;
+    function restartShell() {
+        // Run outside Quickshell so killing this shell cannot cancel its own
+        // replacement process.
+        restartProc.command = ["systemd-run", "--user", "--collect", "--quiet", "/usr/share/omarchy/bin/omarchy-restart-shell"];
+        restartProc.running = true;
     }
 
     function injectPanel() {
@@ -103,12 +105,12 @@ BarWidget {
                 root.bridgeError = setupProc.errorOutput.trim() || "Bridge installation failed";
                 return;
             }
-            var freshInstall = setupProc.setupOutput.indexOf("already installed") === -1;
-            if (freshInstall) {
-                // New bridge downloaded: reload the plugin so the shell runs
-                // the new widget with the binary ready. The reloaded widget
-                // picks up any pending-open marker.
-                root.shellRescan();
+            var restartNeeded = setupProc.setupOutput.indexOf("OMAMOVIE_RESTART_SHELL=1") !== -1;
+            if (restartNeeded) {
+                // Add and update each record a new git revision exactly once.
+                // Restart the full shell; the replacement widget picks up any
+                // pending-open marker left by a click during installation.
+                root.restartShell();
                 return;
             }
             if (root.userClickedInstall) {
@@ -137,10 +139,10 @@ BarWidget {
     }
 
     Process {
-        id: rescanProc
+        id: restartProc
         onExited: function(exitCode) {
             if (exitCode !== 0 && root.bridgeReady)
-                root.bridgeError = "Shell reload after bridge install failed";
+                root.bridgeError = "Shell restart after plugin install or update failed";
         }
     }
 

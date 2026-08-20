@@ -18,16 +18,16 @@ Prerequisite:
 omarchy pkg add mpv
 ```
 
-Add the plugin and download the prebuilt bridge:
+Add and enable the plugin:
 
 ```bash
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable --yes
-omarchy-shell shell rescanPlugins
-
-# downloads the release for your CPU, verifies SHA256, installs to ~/.local/bin
-~/.config/omarchy/plugins/tenzin.omamovie/omamovie-setup.sh
-omarchy-shell shell rescanPlugins
 ```
+
+That single command clones the plugin, enables its bar widget, downloads the
+matching prebuilt bridge, verifies `SHA256SUMS`, and stores it privately under
+`~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. Click the bar icon after
+the brief first-run download finishes.
 
 Click the **video camera** icon in the bar: search, pick a title, choose a
 stream (resolution / codec / size), Play. Series get a season + episode
@@ -36,16 +36,19 @@ picker; subtitles are downloaded automatically when available.
 ## Update
 
 ```bash
-omarchy plugin update tenzin.omamovie --yes     # pull new plugin code
-~/.config/omarchy/plugins/tenzin.omamovie/omamovie-setup.sh   # download new bridge
+omarchy plugin update tenzin.omamovie --yes
 ```
+
+The shell reloads the updated widget. If `manifest.json` has a new version,
+the matching release bridge is downloaded automatically.
 
 ## Remove
 
 ```bash
 omarchy plugin remove tenzin.omamovie --yes
-rm -f ~/.local/bin/omamovie-bridge              # optional: drop the bridge
 ```
+
+The private `.runtime/` directory and bridge are removed with the plugin.
 
 ## How it works
 
@@ -53,7 +56,7 @@ rm -f ~/.local/bin/omamovie-bridge              # optional: drop the bridge
 BarWidget.qml ──► opens Panel.qml (Quickshell popup UI)
                       │
                       ▼  newline-JSON via CLI
-              omamovie-bridge  (Rust, ~/.local/bin)
+              omamovie-bridge  (Rust, plugin .runtime/)
                       │  links moviebox-tui crate (pinned git rev)
                       ▼  search / suggest / details / resources /
                          captions / subfile / poster (cached)
@@ -67,12 +70,13 @@ passes a JSON request and reads one JSON line back. Posters are cached in
 ### Bridge commands
 
 ```bash
-omamovie-bridge '{"cmd":"search","q":"dune","page":1}'
-omamovie-bridge '{"cmd":"details","id":"<subjectId>"}'
-omamovie-bridge '{"cmd":"resources","id":"<id>","season":1,"episode":2}'
-omamovie-bridge '{"cmd":"captions","id":"<id>","rid":"<resourceId>"}'
-omamovie-bridge '{"cmd":"poster","url":"https://..."}'   # cached file path
-omamovie-bridge '{"cmd":"subfile","url":"https://...srt"}' # downloaded path
+B=~/.config/omarchy/plugins/tenzin.omamovie/.runtime/omamovie-bridge
+$B '{"cmd":"search","q":"dune","page":1}'
+$B '{"cmd":"details","id":"<subjectId>"}'
+$B '{"cmd":"resources","id":"<id>","season":1,"episode":2}'
+$B '{"cmd":"captions","id":"<id>","rid":"<resourceId>"}'
+$B '{"cmd":"poster","url":"https://..."}'
+$B '{"cmd":"subfile","url":"https://...srt"}'
 ```
 
 ## Files

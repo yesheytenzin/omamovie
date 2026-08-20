@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -11,6 +12,18 @@ BarWidget {
     implicitHeight: button.implicitHeight
 
     readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+    readonly property string setupScript: Qt.resolvedUrl("omamovie-setup.sh").toString().replace(/^file:\/\//, "")
+    property bool bridgeReady: false
+    property bool installing: false
+    property string bridgeError: ""
+
+    function ensureBridge() {
+        if (setupProc.running) return;
+        root.installing = true;
+        root.bridgeError = "";
+        setupProc.command = ["bash", root.setupScript];
+        setupProc.running = true;
+    }
 
     function injectPanel() {
         var target = panelLoader.item;
@@ -22,6 +35,10 @@ BarWidget {
     }
 
     function togglePanel() {
+        if (!root.bridgeReady) {
+            root.ensureBridge();
+            return;
+        }
         if (panelLoader.item && panelLoader.item.toggle)
             panelLoader.item.toggle();
     }
@@ -41,6 +58,23 @@ BarWidget {
     onBarChanged: injectPanel()
     onSettingsChanged: injectPanel()
 
+    Process {
+        id: setupProc
+        property string errorOutput: ""
+        stderr: SplitParser {
+            onRead: function(data) { setupProc.errorOutput += data + "\n" }
+        }
+        onRunningChanged: {
+            if (running) setupProc.errorOutput = "";
+        }
+        onExited: function(exitCode) {
+            root.installing = false;
+            root.bridgeReady = exitCode === 0;
+            if (!root.bridgeReady)
+                root.bridgeError = setupProc.errorOutput.trim() || "Bridge installation failed";
+        }
+    }
+
     Loader {
         id: panelLoader
         active: true
@@ -58,7 +92,11 @@ BarWidget {
         bar: root.bar
         text: "\uf03d"
         slotSize: Style.bar.statusSlot
-        tooltipText: "OmaMovie \u2022 search, browse and watch movies, shows and anime in mpv"
+        tooltipText: root.installing ? "OmaMovie \u2022 installing bridge \u2026" :
+                     (root.bridgeReady ? "OmaMovie \u2022 search, browse and watch movies, shows and anime in mpv" :
+                      (root.bridgeError || "OmaMovie \u2022 bridge not installed; click to retry"))
         onPressed: root.togglePanel()
     }
+
+    Component.onCompleted: root.ensureBridge()
 }

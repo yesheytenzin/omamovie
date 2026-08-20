@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tenzin.omamovie",
   "name": "OmaMovie",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "author": "tenzin",
   "description": "Your own Omarchy-native UI for movies, TV shows and anime \u2014 search, poster grids, stream picker and mpv playback, powered by the MovieBox-TUI engine through a local Rust bridge.",
   "kinds": [

@@ -34,8 +34,8 @@ trap 'rm -rf "$TMP"' EXIT
 ARCHIVE="OmaMovie_Linux_${ARCH}.tar.gz"
 
 say "downloading $ARCHIVE ..."
-curl -fSL --retry 3 -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE"
-curl -fSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
+curl -fsSL --retry 3 -o "$TMP/$ARCHIVE" "$RELEASE_BASE/$ARCHIVE"
+curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
 (cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet) ||
   fail "release checksum verification failed"
 

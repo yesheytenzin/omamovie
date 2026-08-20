@@ -10,13 +10,5 @@
   ],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
-  },
-  "barWidget": {
-    "displayName": "OmaMovie",
-    "description": "OmaMovie",
-    "category": "Media",
-    "allowMultiple": false,
-    "defaultSection": "right"
-  },
-  "license": "MIT"
+  }
 }

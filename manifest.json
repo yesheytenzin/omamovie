@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tenzin.omamovie",
   "name": "OmaMovie",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "author": "tenzin",
   "description": "Search instantly \u2014 type in Discover or Search to find movies, shows & anime in a poster grid.\nPick season/episode and stream (resolution, codec, size) from the details view.\nOne-click Play opens mpv \u2014 video plays externally, subs auto-downloaded, panel closes.",
   "kinds": [
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "OmaMovie",
-    "description": "Search, browse Discover, and play movies/shows/anime in mpv \u2014 3-step: search \u2192 pick stream \u2192 Play",
+    "description": "OmaMovie",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right",

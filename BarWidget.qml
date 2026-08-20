@@ -144,7 +144,7 @@ BarWidget {
         id: button
         anchors.fill: parent
         bar: root.bar
-        text: "󰨂"
+        text: ""
         slotSize: Style.bar.statusSlot
         tooltipText: root.installing ? "OmaMovie \u2022 installing bridge \u2026" :
                      (root.bridgeReady ? "OmaMovie \u2022 search, browse and watch movies, shows and anime in mpv" :

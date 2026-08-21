@@ -92,7 +92,6 @@ def caption_options(payload: dict) -> list[tuple[str,str]]:
     return opts
 
 def clean_title_simple(raw: str) -> str:
-    # main.rs clean_title
     if not raw:
         return ""
     return raw.split("[")[0].strip()

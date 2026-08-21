@@ -175,8 +175,14 @@ Panel {
     function coverUrlOf(obj) {
         if (!obj) return "";
         var c = obj.cover;
-        if (c && typeof c === "object") return c.url || "";
-        if (typeof c === "string") return c;
+        if (c && typeof c === "object") return root.safeUrl(c.url || "");
+        if (typeof c === "string") return root.safeUrl(c);
+        return "";
+    }
+    // Only http(s) URLs may reach Image.source (scraper-controlled data)
+    function safeUrl(s) {
+        s = String(s || "");
+        if (s.indexOf("https://") === 0 || s.indexOf("http://") === 0) return s;
         return "";
     }
     function episodeCount(se) {
@@ -249,7 +255,7 @@ Panel {
         root.streams = [];
         root.selStream = -1;
         root.subs = [];
-        detailPoster.source = it.cover || "";
+        detailPoster.source = root.safeUrl(it.cover);
         root.view = "details";
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
@@ -302,7 +308,7 @@ Panel {
                 }
             }
             var cover = root.coverUrlOf(root.details);
-            if (cover) detailPoster.source = cover;
+            if (cover) detailPoster.source = root.safeUrl(cover);
         });
     }
 
@@ -316,7 +322,7 @@ Panel {
         root.streams = [];
         root.selStream = -1;
         root.subs = [];
-        detailPoster.source = it.cover || "";
+        detailPoster.source = root.safeUrl(it.cover);
         root.view = "details";
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
@@ -365,7 +371,7 @@ Panel {
                 }
             }
             var cover = root.coverUrlOf(root.details);
-            if (cover) detailPoster.source = cover;
+            if (cover) detailPoster.source = root.safeUrl(cover);
         });
     }
 
@@ -990,7 +996,7 @@ Panel {
                                     // hover scale removed
                                     Image {
                                         anchors.fill: parent
-                                        source: model.cover || model.coverPath || ""
+                                        source: root.safeUrl(model.cover) || root.safeUrl(model.coverPath)
                                         fillMode: Image.PreserveAspectCrop
                                         visible: source !== ""
                                         asynchronous: true
@@ -1105,7 +1111,7 @@ Panel {
                             Behavior on border.width { NumberAnimation { duration: 100 } }
                             Image {
                                 anchors.fill: parent
-                                source: model.cover || model.coverPath || ""
+                                source: root.safeUrl(model.cover) || root.safeUrl(model.coverPath)
                                 fillMode: Image.PreserveAspectCrop
                                 visible: source !== ""
                                 asynchronous: true

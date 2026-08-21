@@ -50,20 +50,7 @@ fn is_trailer_title(title: &str) -> bool {
 
 fn filter_and_sort_search_items(mut items: Vec<serde_json::Value>, query: &str) -> Vec<serde_json::Value> {
     let q = query.trim().to_lowercase();
-    // Dedupe by id first (same trailer repeated per season)
-    {
-        let mut seen = std::collections::HashSet::new();
-        items.retain(|v| {
-            if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
-                if seen.contains(id) {
-                    return false;
-                }
-                seen.insert(id.to_string());
-            }
-            true
-        });
-    }
-    // Filter to movies/series only and non-trailer titles
+    // Filter to movies/series only and non-trailer titles first
     items.retain(|v| {
         let stype = v.get("stype").and_then(|s| s.as_i64()).unwrap_or(0);
         if stype != 1 && stype != 2 {
@@ -93,6 +80,17 @@ fn filter_and_sort_search_items(mut items: Vec<serde_json::Value>, query: &str) 
         let ra = a.get("rating").and_then(|r| r.as_f64()).unwrap_or(0.0);
         let rb = b.get("rating").and_then(|r| r.as_f64()).unwrap_or(0.0);
         rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    // Dedupe by id AFTER sort — keeps highest relevance/rating variant, fixes "Absolutely Amazing" vs "Breaking Bad" mismatch
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|v| {
+        if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
+            if seen.contains(id) {
+                return false;
+            }
+            seen.insert(id.to_string());
+        }
+        true
     });
     items
 }
@@ -150,12 +148,8 @@ fn unwrap_homepage_subjects(value: &Value) -> Vec<Value> {
 fn normalize_search_item(item: &Value) -> Value {
     let id = subject_id(item.get("subjectId").or_else(|| item.get("id")).unwrap_or(&Value::Null))
         .unwrap_or_default();
-    let raw_title = item.get("postTitle").and_then(|t| t.as_str()).unwrap_or("");
-    let title = if raw_title.is_empty() {
-        clean_title(item.get("title").and_then(|t| t.as_str()).unwrap_or(""))
-    } else {
-        raw_title.trim().to_string()
-    };
+    // Title only as per user choice — never use postTitle which caused "Absolutely Amazing" for Breaking Bad
+    let title = clean_title(item.get("title").and_then(|t| t.as_str()).unwrap_or(""));
     let stype = moviebox_tui::service::stype(item);
     let year: String = item
         .get("releaseDate")
@@ -224,7 +218,8 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                 let items: Vec<Value> = unwrap_subjects(&cached)
                     .into_iter()
                     .filter_map(|subj| {
-                        let name = subj.get("postTitle").or_else(|| subj.get("title")).and_then(|n| n.as_str()).map(|n| clean_title(n)).unwrap_or_default();
+                        // title only — fixes postTitle mismatch
+                        let name = subj.get("title").and_then(|n| n.as_str()).map(|n| clean_title(n)).unwrap_or_default();
                         if name.is_empty() || is_trailer_title(&name) { return None; }
                         let stype = moviebox_tui::service::stype(&subj);
                         if stype != 1 && stype != 2 { return None; }
@@ -242,8 +237,7 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                 .into_iter()
                 .filter_map(|s| {
                     let name = s
-                        .get("postTitle")
-                        .or_else(|| s.get("title"))
+                        .get("title")
                         .and_then(|n| n.as_str())
                         .map(|n| clean_title(n))
                         .unwrap_or_default();
@@ -274,17 +268,26 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
         "search" => {
             let q = str_arg(req, "q");
             let page = usz_arg(req, "page", 1).max(1);
-            if q.is_empty() {
+            if q.trim().is_empty() {
                 return Ok(json!({ "items": [] }));
             }
-            if let Some(cached) = moviebox_tui::cache::get_provider_search_cache(ProviderKind::MovieBox, &q, page) {
+            // Normalize cache key to lowercased trimmed for consistent hits (fixes "Breaking Bad" vs "breaking bad")
+            let cq = q.trim().to_lowercase();
+            if let Some(cached) = moviebox_tui::cache::get_provider_search_cache(ProviderKind::MovieBox, &cq, page) {
                 let items: Vec<Value> = unwrap_subjects(&cached)
                     .iter()
                     .map(normalize_search_item)
                     .collect();
                 let filtered = filter_and_sort_search_items(items, &q);
-                if !filtered.is_empty() {
-                    return Ok(json!({ "items": filtered }));
+                // Unify final filter with live path — ensure Breaking Bad query doesn't return Absolutely Amazing from stale cache
+                let query_filtered: Vec<Value> = filtered.iter().filter(|v| {
+                    if let Some(t) = v.get("title").and_then(|t| t.as_str()) {
+                        t.to_lowercase().contains(&cq)
+                    } else { false }
+                }).cloned().collect();
+                let final_items = if !query_filtered.is_empty() { query_filtered } else { filtered };
+                if !final_items.is_empty() {
+                    return Ok(json!({ "items": final_items }));
                 }
             }
             let _ = svc.client.init().await;
@@ -294,7 +297,7 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                 .map(normalize_search_item)
                 .collect();
             if !items.is_empty() {
-                moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &q, page, &raw);
+                moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &cq, page, &raw);
             }
             let mut filtered = filter_and_sort_search_items(items, &q);
             // If we have few valid results, try next pages to find exact title
@@ -304,7 +307,7 @@ async fn run(cmd: &str, req: &Value) -> Result<Value, String> {
                     if let Ok(raw2) = svc.search(ProviderKind::MovieBox, &q, next_page).await {
                         let items2: Vec<Value> = unwrap_subjects(&raw2).iter().map(normalize_search_item).collect();
                         if items2.is_empty() { break; }
-                        moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &q, next_page, &raw2);
+                        moviebox_tui::cache::set_provider_search_cache(ProviderKind::MovieBox, &cq, next_page, &raw2);
                         let mut more = filter_and_sort_search_items(items2, &q);
                         // Only keep more that contains query as substring for relevance
                         more.retain(|v| {

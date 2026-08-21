@@ -4,7 +4,7 @@
   "name": "OmaMovie",
   "version": "1.5.19",
   "author": "tenzin",
-  "description": "Search instantly \u2014 type in Discover or Search to find movies, shows & anime in a poster grid.\nPick season/episode and stream (resolution, codec, size) from the details view.\nOne-click Play opens mpv \u2014 video plays externally, subs auto-downloaded, panel closes.",
+  "description": "Search instantly — type in Discover or Search to find movies, shows & anime in a poster grid. Pick season/episode and stream (resolution, codec, size) from the details view. One-click Play opens mpv — video plays externally, subs auto-downloaded, panel closes.",
   "kinds": [
     "bar-widget"
   ],

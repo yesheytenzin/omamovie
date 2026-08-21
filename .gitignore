@@ -1,1 +1,9 @@
 .runtime/
+# Bundled ELFs removed for provenance — built reproducibly in CI from locked source
+# and published as attested release archives. Keep version files, ignore binaries.
+prebuilt/x64/omamovie-bridge
+prebuilt/x64/omamovie-bridge.sha256
+prebuilt/arm64/omamovie-bridge
+prebuilt/arm64/omamovie-bridge.sha256
+# Ignore any future binary artifacts in prebuilt/
+prebuilt/**/*.tar.gz

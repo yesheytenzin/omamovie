@@ -1,0 +1,3 @@
+# No hard dependencies - client falls back to urllib if requests missing.
+# Uncomment to prefer requests for better keep-alive/retry handling:
+# requests>=2.28

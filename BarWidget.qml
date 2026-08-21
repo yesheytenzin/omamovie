@@ -13,7 +13,7 @@ BarWidget {
 
     readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
     readonly property string setupScript: Qt.resolvedUrl("omamovie-setup.sh").toString().replace(/^file:\/\//, "")
-    readonly property string pendingOpenMarker: Qt.resolvedUrl(".runtime/.pending-open").toString().replace(/^file:\/\//, "")
+    readonly property string pendingOpenMarker: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/omamovie/.pending-open"
     property bool bridgeReady: false
     property bool installing: false
     property string bridgeError: ""

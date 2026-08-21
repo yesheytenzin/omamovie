@@ -43,7 +43,7 @@ Panel {
         });
     }
 
-    readonly property string bridge: Qt.resolvedUrl(".runtime/omamovie-bridge").toString().replace(/^file:\/\//, "")
+    readonly property string bridge: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/omamovie/omamovie-bridge"
 
     implicitWidth: 820
     implicitHeight: 560

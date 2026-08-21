@@ -26,7 +26,7 @@ Add and enable the plugin:
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-That single command clones the plugin, enables its bar widget, and installs the bridge **built reproducibly from locked source by default** (`bridge/rust-toolchain.toml` `1.85.0`, `cargo --locked`, `SOURCE_DATE_EPOCH`, `Cargo.lock` pinned `moviebox-tui@90acb82c`). If `cargo` is present it builds locally; otherwise it downloads the attested release tarball `OmaMovie_Linux_$ARCH.tar.gz` and verifies `SHA256SUMS` **and** SLSA provenance (`actions/attest-build-provenance`, `gh attestation verify`) fail-closed before extracting to `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. No bundled ELF is executed without independent verification. The Omarchy shell restarts automatically; if you click during the brief first-run build/download, the panel opens once ready.
+That single command clones the plugin, enables its bar widget, and installs the bridge **built reproducibly from locked source by default** (`bridge/rust-toolchain.toml` 1.90.0`, `cargo --locked`, `SOURCE_DATE_EPOCH`, `Cargo.lock` pinned `moviebox-tui@90acb82c`). If `cargo` is present it builds locally; otherwise it downloads the attested release tarball `OmaMovie_Linux_$ARCH.tar.gz` and verifies `SHA256SUMS` **and** SLSA provenance (`actions/attest-build-provenance`, `gh attestation verify`) fail-closed before extracting to `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. No bundled ELF is executed without independent verification. The Omarchy shell restarts automatically; if you click during the brief first-run build/download, the panel opens once ready.
 
 Bundled `prebuilt/` ELFs from older releases are no longer shipped or trusted by default — they are ignored unless you explicitly `OMAMOVIE_ALLOW_PREBUILT=1` (then still verified against a SLSA bundle, fail-closed). To force a release download even when `cargo` exists: `OMAMOVIE_PREFER_RELEASE=1`.
 
@@ -91,18 +91,18 @@ omamovie/
   bridge/
     Cargo.toml           # pins moviebox-tui (rev 90acb82c)
     Cargo.lock           # fully locked deps
-    rust-toolchain.toml  # pins Rust 1.85.0 for reproducible local/CI builds
+    rust-toolchain.toml` 1.90.0 for reproducible local/CI builds
     src/main.rs          # JSON bridge over the upstream engine
   .github/workflows/release.yml # pinned action SHAs, SLSA attest of raw binary + tarball
   README.md  LICENSE
 ```
 
-Bridge binaries are built reproducibly in CI (`bridge/rust-toolchain.toml` `1.85.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --locked`, `RUSTFLAGS=-Cstrip=debuginfo`, `tar --sort-name --mtime --owner=0`) for `x86_64`+`aarch64` on each `v*` tag, and published as `OmaMovie_Linux_*.tar.gz` + `SHA256SUMS` with SLSA provenance (`actions/attest-build-provenance` pinned to commit SHAs, `id-token`/`attestations: write` least-privilege). The default install builds from source; the fallback verifies `SHA256SUMS` and the tarball’s SLSA attestation (`gh attestation verify`) fail-closed before extracting — the exact installed binary is thus bound to the reviewed source revision. No bundled `prebuilt/` ELF is trusted by default.
+Bridge binaries are built reproducibly in CI (`bridge/rust-toolchain.toml` 1.90.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --locked`, `RUSTFLAGS=-Cstrip=debuginfo`, `tar --sort-name --mtime --owner=0`) for `x86_64`+`aarch64` on each `v*` tag, and published as `OmaMovie_Linux_*.tar.gz` + `SHA256SUMS` with SLSA provenance (`actions/attest-build-provenance` pinned to commit SHAs, `id-token`/`attestations: write` least-privilege). The default install builds from source; the fallback verifies `SHA256SUMS` and the tarball’s SLSA attestation (`gh attestation verify`) fail-closed before extracting — the exact installed binary is thus bound to the reviewed source revision. No bundled `prebuilt/` ELF is trusted by default.
 
 ### Reproducible verification
 
 ```bash
-cat bridge/rust-toolchain.toml  # 1.85.0
+cat bridge/rust-toolchain.toml` 1.90.0
 cargo build --locked --release --manifest-path bridge/Cargo.toml --target x86_64-unknown-linux-gnu
 sha256sum bridge/target/x86_64-unknown-linux-gnu/release/omamovie-bridge  # compare to attested binary
 # Verify a release artifact’s provenance (requires gh CLI)

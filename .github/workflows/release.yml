@@ -39,7 +39,7 @@ jobs:
           # Pin epoch to commit timestamp for reproducibility
           export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
           echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
-          cargo build --frozen --locked --release --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
+          cargo build --locked --release --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
       - name: Package bridge
         run: |
           strip "bridge/target/${{ matrix.target }}/release/omamovie-bridge"

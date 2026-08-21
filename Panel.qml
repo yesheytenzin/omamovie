@@ -6,35 +6,6 @@ import Quickshell.Io
 import QtMultimedia
 import qs.Commons
 import qs.Ui
-function sanitize(s) {
-    if (!s) return "";
-    return String(s).replace(/<[^>]*>/g, "");
-}
-
-function sanitizeDetails(d) {
-    if (!d) return null;
-    var out = {};
-    for (var k in d) {
-        var v = d[k];
-        if (typeof v === "string") out[k] = sanitize(v);
-        else if (Array.isArray(v)) out[k] = v.map(function(x) { return typeof x === "string" ? sanitize(x) : x; });
-        else out[k] = v;
-    }
-    return out;
-}
-
-function sanitizeStreams(arr) {
-    if (!Array.isArray(arr)) return [];
-    return arr.map(function(s) {
-        var out = {};
-        for (var k in s) {
-            var v = s[k];
-            if (typeof v === "string") out[k] = sanitize(v);
-            else out[k] = v;
-        }
-        return out;
-    });
-}
 
 Panel {
     id: root
@@ -43,6 +14,34 @@ Panel {
     property var anchorItem: null
     property var hostWidget: null
     readonly property var barIdentity: hostWidget || root
+
+    function sanitize(s) {
+        if (!s) return "";
+        return String(s).replace(/<[^>]*>/g, "");
+    }
+    function sanitizeDetails(d) {
+        if (!d) return null;
+        var out = {};
+        for (var k in d) {
+            var v = d[k];
+            if (typeof v === "string") out[k] = root.sanitize(v);
+            else if (Array.isArray(v)) out[k] = v.map(function(x) { return typeof x === "string" ? root.sanitize(x) : x; });
+            else out[k] = v;
+        }
+        return out;
+    }
+    function sanitizeStreams(arr) {
+        if (!Array.isArray(arr)) return [];
+        return arr.map(function(s) {
+            var out = {};
+            for (var k in s) {
+                var v = s[k];
+                if (typeof v === "string") out[k] = root.sanitize(v);
+                else out[k] = v;
+            }
+            return out;
+        });
+    }
 
     readonly property string bridge: Qt.resolvedUrl(".runtime/omamovie-bridge").toString().replace(/^file:\/\//, "")
 
@@ -179,7 +178,7 @@ Panel {
             resultModel.clear();
             for (var i = 0; i < root.results.length; i++) {
                 var r = root.results[i];
-                resultModel.append({ id: sanitize(r.id), title: sanitize(r.title), year: sanitize(r.year || ""), rating: sanitize(r.rating !== null ? String(r.rating) : "-"), cover: sanitize(r.cover || ""), coverPath: sanitize(r.cover || ""), duration: sanitize(r.duration || ""), stype: sanitize(r.stype || "") });
+                resultModel.append({ id: root.sanitize(r.id), title: root.sanitize(r.title), year: root.sanitize(r.year || ""), rating: root.sanitize(r.rating !== null ? String(r.rating) : "-"), cover: root.sanitize(r.cover || ""), coverPath: root.sanitize(r.cover || ""), duration: root.sanitize(r.duration || ""), stype: root.sanitize(r.stype || "") });
             }
             root.view = "grid";
             root.statusText = resultModel.count + " results for \u201C" + q + "\u201D";
@@ -193,8 +192,8 @@ Panel {
     function openDetails(idx) {
         if (idx < 0 || idx >= resultModel.count) return;
         var it = resultModel.get(idx);
-        root.currentId = sanitize(it.id);
-        root.currentTitle = sanitize(it.title);
+        root.currentId = root.sanitize(it.id);
+        root.currentTitle = root.sanitize(it.title);
         // optimistic — switch immediately for snappy feel
         root.details = null;
         root.seasons = [];
@@ -217,7 +216,7 @@ Panel {
             if (gen !== root.detailGen) return;
             if (root.currentId !== it.id) return;
             if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
-                root.streams = sanitizeStreams(resp.items);
+                root.streams = root.sanitizeStreams(resp.items);
                 root.selStream = 0;
                 root.statusText = "Pick a stream and press Play";
                 root.busy = false;
@@ -230,7 +229,7 @@ Panel {
                 root.statusText = (resp && resp.error) || "Details failed";
                 return;
             }
-            root.details = sanitizeDetails(resp.value);
+            root.details = root.sanitizeDetails(resp.value);
             var ss = (resp.value && resp.value.seasons && resp.value.seasons.seasons) || [];
             root.seasons = ss.length ? ss : [];
             root.curSeason = 1;
@@ -261,8 +260,8 @@ Panel {
     function openHomeDetails(idx) {
         if (idx < 0 || idx >= homeModel.count) return;
         var it = homeModel.get(idx);
-        root.currentId = sanitize(it.id);
-        root.currentTitle = sanitize(it.title);
+        root.currentId = root.sanitize(it.id);
+        root.currentTitle = root.sanitize(it.title);
         root.details = null;
         root.seasons = [];
         root.streams = [];
@@ -282,7 +281,7 @@ Panel {
             if (gen !== root.detailGen) return;
             if (root.currentId !== it.id) return;
             if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
-                root.streams = sanitizeStreams(resp.items);
+                root.streams = root.sanitizeStreams(resp.items);
                 root.selStream = 0;
                 root.statusText = "Pick a stream and press Play";
                 root.busy = false;
@@ -295,7 +294,7 @@ Panel {
                 root.statusText = (resp && resp.error) || "Details failed";
                 return;
             }
-            root.details = sanitizeDetails(resp.value);
+            root.details = root.sanitizeDetails(resp.value);
             var ss = (resp.value && resp.value.seasons && resp.value.seasons.seasons) || [];
             root.seasons = ss.length ? ss : [];
             root.curSeason = 1;
@@ -329,7 +328,7 @@ Panel {
         request("resources", { id: root.currentId, season: se, episode: ep, perPage: 20 }, function(resp, code) {
             if (gen !== root.resourceGen) return;
             root.busy = false;
-            root.streams = sanitizeStreams((resp && resp.ok && resp.items) ? resp.items : []);
+            root.streams = root.sanitizeStreams((resp && resp.ok && resp.items) ? resp.items : []);
             root.selStream = root.streams.length > 0 ? 0 : -1;
             if (root.streams.length === 0)
                 root.statusText = "No streams available for this \u2026";
@@ -454,7 +453,7 @@ Panel {
             homeModel.clear();
             for (var k = 0; k < items.length && k < 24; k++) {
                 var r = items[k];
-                homeModel.append({ id: sanitize(r.id), title: sanitize(r.title), year: sanitize(r.year || ""), rating: sanitize(r.rating !== null ? String(r.rating) : "-"), cover: sanitize(r.cover || ""), coverPath: sanitize(r.cover || ""), duration: sanitize(r.duration || ""), stype: sanitize(r.stype || "") });
+                homeModel.append({ id: root.sanitize(r.id), title: root.sanitize(r.title), year: root.sanitize(r.year || ""), rating: root.sanitize(r.rating !== null ? String(r.rating) : "-"), cover: root.sanitize(r.cover || ""), coverPath: root.sanitize(r.cover || ""), duration: root.sanitize(r.duration || ""), stype: root.sanitize(r.stype || "") });
             }
             root.view = "home";
             root.statusText = homeModel.count ? "Discover \u2022 " + homeModel.count + " titles" : "Search movies, shows and anime";
@@ -492,7 +491,7 @@ Panel {
             resultModel.clear();
             for (var i = 0; i < root.results.length; i++) {
                 var r = root.results[i];
-                resultModel.append({ id: sanitize(r.id), title: sanitize(r.title), year: sanitize(r.year || ""), rating: sanitize(r.rating !== null ? String(r.rating) : "-"), cover: sanitize(r.cover || ""), coverPath: sanitize(r.cover || ""), duration: sanitize(r.duration || ""), stype: sanitize(r.stype || "") });
+                resultModel.append({ id: root.sanitize(r.id), title: root.sanitize(r.title), year: root.sanitize(r.year || ""), rating: root.sanitize(r.rating !== null ? String(r.rating) : "-"), cover: root.sanitize(r.cover || ""), coverPath: root.sanitize(r.cover || ""), duration: root.sanitize(r.duration || ""), stype: root.sanitize(r.stype || "") });
             }
             root.view = "grid";
             root.statusText = resultModel.count + " " + genre + " titles";
@@ -584,7 +583,7 @@ Panel {
                 suggestionModel.clear();
                 var list = (resp && resp.ok && resp.suggestions) ? resp.suggestions : [];
                 for (var i = 0; i < list.length && i < 8; i++)
-                    suggestionModel.append({ name: sanitize(list[i].name) });
+                    suggestionModel.append({ name: root.sanitize(list[i].name) });
             });
         }
     }

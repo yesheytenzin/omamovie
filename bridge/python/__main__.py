@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Python bridge for OmaMovie - replaces Rust omamovie-bridge binary.
-Implements same CLI JSON contract as bridge/src/main.rs"""
+"""Python bridge for OmaMovie - pure Python backend (Rust removed)."""
 import sys
 import json
 import os
@@ -76,6 +75,21 @@ def usz_arg(req: dict, key: str, default: int) -> int:
         except:
             return default
     return default
+
+def safe_http_url(u) -> str:
+    if isinstance(u, str) and (u.startswith("https://") or u.startswith("http://")):
+        return u
+    return ""
+
+def sanitize_details_value(value):
+    # Enforce http(s) scheme on any URL that can reach QML Image.source
+    if not isinstance(value, dict):
+        return value
+    for key in ("cover", "stills", "trailer"):
+        node = value.get(key)
+        if isinstance(node, dict) and isinstance(node.get("url"), str):
+            node["url"] = safe_http_url(node["url"])
+    return value
 
 def clean_title(raw: str) -> str:
     return raw.split("[")[0].strip() if raw else ""
@@ -197,10 +211,9 @@ def normalize_search_item(item: dict):
         url = c.get("url")
         if isinstance(url, str):
             cover = url
+    cover = safe_http_url(cover)
     if not cover:
-        cover = extract_cover_url(item)
-        if cover and not cover.startswith("http"):
-            cover = None
+        cover = safe_http_url(extract_cover_url(item))
     rating = None
     irv = item.get("imdbRatingValue")
     if isinstance(irv, str):
@@ -263,10 +276,9 @@ def run(cmd: str, req: dict):
                     url = c.get("url")
                     if isinstance(url, str):
                         cover = url
+                cover = safe_http_url(cover)
                 if not cover:
-                    cover = extract_cover_url(subj)
-                    if cover and not cover.startswith("http"):
-                        cover = None
+                    cover = safe_http_url(extract_cover_url(subj))
                 filtered.append({"name": name, "id": idv, "cover": cover})
             if filtered:
                 return {"suggestions": filtered[:8]}
@@ -298,10 +310,9 @@ def run(cmd: str, req: dict):
                 url = c.get("url")
                 if isinstance(url, str):
                     cover = url
+            cover = safe_http_url(cover)
             if not cover:
-                cover = extract_cover_url(s)
-                if cover and not cover.startswith("http"):
-                    cover = None
+                cover = safe_http_url(extract_cover_url(s))
             out.append({"name": name, "id": idv, "cover": cover})
         return {"suggestions": out[:8]}
 
@@ -451,7 +462,7 @@ def run(cmd: str, req: dict):
             raise ValueError("missing id")
         cached = get_provider_details_cache("moviebox", idv)
         if cached is not None:
-            return {"value": cached}
+            return {"value": sanitize_details_value(cached)}
         try:
             client.init()
         except:
@@ -461,7 +472,7 @@ def run(cmd: str, req: dict):
             set_provider_details_cache("moviebox", idv, value)
         except:
             pass
-        return {"value": value}
+        return {"value": sanitize_details_value(value)}
 
     elif cmd == "resources":
         idv = str_arg(req, "id")
@@ -528,6 +539,9 @@ def run(cmd: str, req: dict):
         url = str_arg(req, "url")
         if not url:
             raise ValueError("missing url")
+        url = safe_http_url(url)
+        if not url:
+            raise ValueError("poster url must be http(s)")
         short = hashlib.md5(url.encode()).hexdigest()[:16]
         pdir = poster_dir()
         for ext in ["jpg", "png", "webp", "img"]:

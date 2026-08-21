@@ -25,7 +25,7 @@ omarchy plugin remove tenzin.omamovie
 
 ## Backend
 
-Python port of `bridge/src/main.rs` + `moviebox-tui` crates. `Panel.qml` unchanged — same CLI JSON contract.
+Pure Python — no Rust, no compilation, no binary downloads. `Panel.qml` unchanged — same CLI JSON contract.
 
 | File | Role |
 |---|---|
@@ -34,7 +34,7 @@ Python port of `bridge/src/main.rs` + `moviebox-tui` crates. `Panel.qml` unchang
 | `bridge/python/cache.py` | `~/.cache/moviebox-tui/` — 24h search/details, 2h streams, 1h homepage |
 | `bridge/python/__main__.py` | `ping`/`search`/`suggest`/`details`/`resources`/`captions`/`homepage` + filtering/sorting |
 
-Legacy Rust (`bridge/Cargo.toml`, `bridge/src/`) remains for reference, not built. `prebuilt/` removed; history purged via `filter-repo` (removed `bridge/target`, ~224M).
+Rust bridge (`moviebox-tui` crates) fully replaced; removed from repo.
 
 ## Panel
 

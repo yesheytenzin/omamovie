@@ -1,4 +1,4 @@
-"""Port of providers/moviebox/title.rs"""
+"""MovieBox title cleaning helpers"""
 def clean_moviebox_title(raw_title: str) -> str:
     title = raw_title.strip()
     if not title:
@@ -76,10 +76,6 @@ def clean_moviebox_title(raw_title: str) -> str:
     return cleaned
 
 def clean_title(raw: str) -> str:
-    # bridge/src/main.rs clean_title splits on '[' and takes first
-    # but titles.py is more complete. Keep simple for search normalization? use clean_moviebox_title for consistency?
-    # main.rs uses: raw.split('[').next().trim()
-    # We'll expose both.
     return raw.split("[")[0].strip() if raw else ""
 
 def language_to_code(name: str):

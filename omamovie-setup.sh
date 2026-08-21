@@ -54,37 +54,27 @@ record_plugin_revision() {
 }
 
 verify_attestation() {
-  # Fail-closed SLSA verification bound to the exact reviewed source commit/ref.
-  # Uses gh attestation verify with --cert-identity (workflow) + --source-ref/digest.
-  # Returns 0 only if attestation is valid and its source equals EXPECTED_COMMIT/EXPECTED_REF.
+  # Fail-closed SLSA verification bound to the exact reviewed source commit/ref (fixes 6ed8c51).
+  # Requires --source-digest to be present and match EXPECTED_COMMIT; no fallback to
+  # ref-only verification (that would allow attestation from another commit on same tag).
   local subject="$1"
   if ! command -v gh >/dev/null 2>&1; then
     warn "gh CLI not found — cannot verify SLSA attestation for $subject"
     return 1
   fi
+  if [[ -z "${EXPECTED_COMMIT:-}" || ! "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    warn "cannot determine expected source commit for $EXPECTED_REF — refusing to verify without digest (fallback to source build)"
+    return 1
+  fi
   local args=(--repo "yesheytenzin/omamovie")
-  # Require the release workflow identity (pinned workflow path at the expected tag)
   args+=(--cert-identity-regex "^https://github.com/yesheytenzin/omamovie/.github/workflows/release.yml@refs/tags/v.*$")
-  # Constrain to the exact reviewed ref and digest — a rebuild from another commit will fail
-  if [[ -n "${EXPECTED_REF:-}" ]]; then
-    args+=(--source-ref "$EXPECTED_REF")
-  fi
-  if [[ -n "${EXPECTED_COMMIT:-}" && "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-    args+=(--source-digest "$EXPECTED_COMMIT")
-  fi
+  args+=(--source-ref "$EXPECTED_REF")
+  args+=(--source-digest "$EXPECTED_COMMIT")
   if gh attestation verify "$subject" "${args[@]}" >/dev/null 2>&1; then
     say "SLSA attestation verified for $subject (source $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12})"
     return 0
   else
-    # Fallback: try without source-digest (older gh) but still require cert identity + source-ref
-    if [[ -n "${EXPECTED_COMMIT:-}" ]]; then
-      warn "attestation verify with source-digest failed — retrying with source-ref only"
-      if gh attestation verify "$subject" --repo "yesheytenzin/omamovie" --cert-identity-regex "^https://github.com/yesheytenzin/omamovie/.github/workflows/release.yml@refs/tags/v.*$" --source-ref "$EXPECTED_REF" >/dev/null 2>&1; then
-        say "SLSA attestation verified for $subject (source $EXPECTED_REF, digest check skipped)"
-        return 0
-      fi
-    fi
-    warn "SLSA attestation verification failed for $subject (expected $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12})"
+    warn "SLSA attestation verification failed for $subject (expected $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12} with digest)"
     return 1
   fi
 }

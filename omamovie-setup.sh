@@ -60,12 +60,9 @@ if [[ -x "$INSTALL_DIR/$BIN" && -f "$VERSION_FILE" && $(<"$VERSION_FILE") == "$V
   fi
 fi
 
-# Handle deprecated env flags gracefully
-if [[ "${OMAMOVIE_BUILD_FROM_SOURCE:-0}" == "1" ]]; then
-  say "OMAMOVIE_BUILD_FROM_SOURCE=1 is deprecated with python backend - ignoring (python source is directly used)"
-fi
-if [[ "${OMAMOVIE_ALLOW_PREBUILT:-0}" == "1" ]]; then
-  warn "OMAMOVIE_ALLOW_PREBUILT is deprecated - python bridge does not use prebuilt ELFs"
+# Handle deprecated env flags gracefully (prebuilt removed)
+if [[ "${OMAMOVIE_BUILD_FROM_SOURCE:-0}" == "1" || "${OMAMOVIE_ALLOW_PREBUILT:-0}" == "1" ]]; then
+  say "OMAMOVIE_BUILD_FROM_SOURCE/ALLOW_PREBUILT is deprecated with python backend - ignoring"
 fi
 
 # Verify python bridge source exists

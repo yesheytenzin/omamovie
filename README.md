@@ -4,21 +4,22 @@
 
 Quickshell panel for movies, shows & anime — search, pick season/episode and stream in `mpv`.
 
+- **No Rust, no binary downloads** — pure Python, `~1.8M` clone (was `~231M` before history purge)
+- **Instant** — dedicated streams process, E1 auto-selected, `≥2` chars for suggestions, recent-search chips, `Esc` to close/clear
+- **Verified** — `py_compile` + crypto unit tests on `push/PR` only (no release artifacts)
+
 ## Prerequisites
 
-Needs **`python3` + `mpv`** (no `cargo` / `gh` required):
+Needs **`python3` + `mpv`** (no `cargo` / `gh`):
 
 ```bash
 omarchy pkg add mpv
-omarchy pkg add python   # provides python3.14 (or python3)
-# optional for faster HTTP keep-alive:
-# omarchy pkg add python-pip && pip install requests
-# or: omarchy pkg add python-requests
+omarchy pkg add python   # provides python3.14 (3.10+ required, verified on 3.14)
+# optional — faster HTTP keep-alive (stdlib urllib is fallback):
+# omarchy pkg add python-requests
 ```
 
-The bridge is pure Python (`bridge/python/`). It uses stdlib `urllib` by default; if `requests` is installed it will use it for keep-alive. No binary download or SLSA attestation is needed — the source is directly audited.
-
-Requires Python 3.10+. Verified on 3.14.
+Stdlib `urllib` by default; `requests` used if present. No SLSA attestation — source is directly audited.
 
 ## Install
 
@@ -26,30 +27,36 @@ Requires Python 3.10+. Verified on 3.14.
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-The setup script creates a shim at `.runtime/omamovie-bridge` that forwards to `bridge/python/__main__.py` and verifies with `{"cmd":"ping"}`. Click **** in the bar to browse.
+Creates shim `.runtime/omamovie-bridge` → `bridge/python/__main__.py` and verifies `{"cmd":"ping"}`. Click **** in the bar to browse.
 
-## Backend
-
-Python port of the original Rust bridge (`bridge/src/main.rs` + `moviebox-tui` crates). No compilation, no binary downloads.
-
-- `bridge/python/crypto.py` — HMAC-MD5 request signing (`x-client-token`, `x-tr-signature`)
-- `bridge/python/client.py` — host-pool failover, `requests` or `urllib` fallback
-- `bridge/python/cache.py` — file cache at `~/.cache/moviebox-tui/` (24h search/details, 2h streams)
-- `bridge/python/__main__.py` — CLI JSON bridge (`ping`, `search`, `suggest`, `details`, `resources`, `captions`, `homepage`, etc.) — same contract as the Rust binary (`Panel.qml` unchanged)
-
-Legacy Rust sources remain in `bridge/` but are no longer built or required.
-
-## Update
+## Update / Remove
 
 ```bash
 omarchy plugin update tenzin.omamovie
-```
-
-## Remove
-
-```bash
 omarchy plugin remove tenzin.omamovie
 ```
+
+## Backend
+
+Python port of `bridge/src/main.rs` + `moviebox-tui` crates. `Panel.qml` unchanged — same CLI JSON contract.
+
+| File | Role |
+|---|---|
+| `bridge/python/crypto.py` | HMAC-MD5 signing (`x-client-token`, `x-tr-signature`), sorted query, `x-client-info` |
+| `bridge/python/client.py` | 7-host failover, `requests` or `urllib` fallback, token via `x-user` |
+| `bridge/python/cache.py` | `~/.cache/moviebox-tui/` — 24h search/details, 2h streams, 1h homepage |
+| `bridge/python/__main__.py` | `ping`/`search`/`suggest`/`details`/`resources`/`captions`/`homepage` + filtering/sorting |
+
+Legacy Rust (`bridge/Cargo.toml`, `bridge/src/`) remains for reference, not built. `prebuilt/` removed; history purged via `filter-repo` (removed `bridge/target`, ~224M).
+
+## Panel
+
+- `Esc` closes from any view; clears search field when focused
+- Episodes auto-populate on `openDetails`; `E1` selected, dedicated `streamsProc` for instant load
+- Suggestions gated at `≥2` chars (380ms debounce)
+- Recent searches `Flow` (max 10, deduped, click to re-search)
+- Streams placeholder: `Loading streams for S1E1 …` / `No streams — tap again to retry` (retry `MouseArea`)
+- Sub→dub fallback: `auto-switched to <lang> — N streams` when primary has no streams
 
 ## License
 

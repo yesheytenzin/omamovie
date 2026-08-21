@@ -77,6 +77,8 @@ Panel {
     property bool playerFullscreen: false
     property string selectedGenre: ""
     property int genreGen: 0
+    property var genreCache: ({}) // genre -> items array, fast second-click
+    property var genreCacheTime: ({}) // genre -> timestamp ms
 
     readonly property var genres: [
         "All", "Action", "Comedy", "Drama", "Horror", "Sci-Fi",
@@ -162,10 +164,12 @@ Panel {
         var q = searchField.text.trim();
         if (!q) return;
         root.query = q;
+        root.selectedGenre = ""; // clear genre selection so bar shows All
         root.busy = true;
         root.busyLabel = "Searching \u2026";
         root.statusText = "";
         root.searchGen++;
+        root.genreGen++; // cancel any pending genre fetch
         var gen = root.searchGen;
         request("search", { q: q, page: 1 }, function(resp, code) {
             if (gen !== root.searchGen) return;
@@ -468,13 +472,30 @@ Panel {
         else root.statusText = "Search movies, shows and anime";
     }
 
-    function searchByGenre(genre) {
+    function searchByGenre(genre, force) {
         if (genre === "All" || genre === "") {
             root.selectedGenre = "";
             root.loadHome(true);
             return;
         }
         root.selectedGenre = genre;
+        // Fast path: in-memory cache (10 min) for instant second click — choose best
+        var now = Date.now();
+        var cached = root.genreCache[genre];
+        var cachedAt = root.genreCacheTime[genre] || 0;
+        var fresh = cached && (now - cachedAt < 600000) && !force;
+        if (fresh) {
+            root.results = cached;
+            resultModel.clear();
+            for (var ci = 0; ci < cached.length; ci++) {
+                var cr = cached[ci];
+                resultModel.append({ id: root.sanitize(cr.id), title: root.sanitize(cr.title), year: root.sanitize(cr.year || ""), rating: root.sanitize(cr.rating !== null ? String(cr.rating) : "-"), cover: root.sanitize(cr.cover || ""), coverPath: root.sanitize(cr.cover || ""), duration: root.sanitize(cr.duration || ""), stype: root.sanitize(cr.stype || "") });
+            }
+            root.view = "grid";
+            root.statusText = resultModel.count + " " + genre + " titles";
+            root.busy = false;
+            return;
+        }
         root.busy = true;
         root.busyLabel = "Loading " + genre + " \u2026";
         root.statusText = "";
@@ -488,6 +509,13 @@ Panel {
                 return;
             }
             root.results = resp.items || [];
+            // cache for fast next click
+            var nc = {}; for (var k in root.genreCache) nc[k] = root.genreCache[k];
+            nc[genre] = root.results.slice();
+            root.genreCache = nc;
+            var nt = {}; for (var k2 in root.genreCacheTime) nt[k2] = root.genreCacheTime[k2];
+            nt[genre] = Date.now();
+            root.genreCacheTime = nt;
             resultModel.clear();
             for (var i = 0; i < root.results.length; i++) {
                 var r = root.results[i];
@@ -505,7 +533,7 @@ Panel {
     function refreshCurrent() {
         if (root.view === "home") root.loadHome(true);
         else if (root.view === "grid") {
-            if (root.selectedGenre) root.searchByGenre(root.selectedGenre);
+            if (root.selectedGenre) root.searchByGenre(root.selectedGenre, true);
             else root.doSearch();
         }
         else if (root.view === "details" && root.currentId) {
@@ -721,6 +749,25 @@ Panel {
             }
         }
 
+        // genre selector — persistent for home + grid only (fixes disappearing on genre click)
+        Flow {
+            Layout.fillWidth: true
+            visible: root.view === "home" || root.view === "grid"
+            spacing: 6
+            Repeater {
+                model: root.genres
+                Button {
+                    text: modelData
+                    fontSize: Style.font.caption
+                    horizontalPadding: 10
+                    verticalPadding: 4
+                    enabled: !root.busy && !root.homeLoading
+                    selected: root.selectedGenre === modelData || (modelData === "All" && root.selectedGenre === "")
+                    onClicked: root.searchByGenre(modelData)
+                }
+            }
+        }
+
         // body — fills the fixed panel; same size on every view
         Item {
             id: body
@@ -746,22 +793,6 @@ Panel {
                             font.pixelSize: Style.font.body
                             font.bold: true
                             color: Color.accent
-                        }
-                    }
-                    // Genre selector
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: 6
-                        Repeater {
-                            model: root.genres
-                            Button {
-                                text: modelData
-                                fontSize: Style.font.caption
-                                horizontalPadding: 10
-                                verticalPadding: 4
-                                selected: root.selectedGenre === modelData || (modelData === "All" && root.selectedGenre === "")
-                                onClicked: root.searchByGenre(modelData)
-                            }
                         }
                     }
                     GridView {
@@ -842,9 +873,10 @@ Panel {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 hoverEnabled: true
+                                enabled: !root.busy && !root.homeLoading
                                 onEntered: homeHoverTimer.restart()
                                 onExited: homeHoverTimer.stop()
-                                onClicked: root.openHomeDetails(index)
+                                onClicked: { if (!root.busy && !root.homeLoading) root.openHomeDetails(index) }
                                 Timer {
                                     id: homeHoverTimer
                                     interval: 380
@@ -964,9 +996,10 @@ Panel {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         hoverEnabled: true
-                        onEntered: hoverTimer.restart()
+                        enabled: !root.busy
+                        onEntered: if (!root.busy) hoverTimer.restart()
                         onExited: hoverTimer.stop()
-                        onClicked: root.openDetails(index)
+                        onClicked: { if (!root.busy) root.openDetails(index) }
                         Timer {
                             id: hoverTimer
                             interval: 380

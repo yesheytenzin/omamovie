@@ -1,101 +1,60 @@
-name: Release bridge
+name: CI - Python bridge
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: ["main", "master"]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            asset: OmaMovie_Linux_x64.tar.gz
-            binary: omamovie-bridge
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            asset: OmaMovie_Linux_arm64.tar.gz
-            binary: omamovie-bridge
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
+  test-python-bridge:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master pinned 2026-08-21
-        with:
-          toolchain: 1.90.0
-          targets: ${{ matrix.target }}
-      - name: Build bridge (reproducible, locked)
-        env:
-          SOURCE_DATE_EPOCH: 0
-          CARGO_INCREMENTAL: 0
-          RUSTFLAGS: "-Cstrip=debuginfo"
-          CARGO_TERM_COLOR: never
+          python-version: "3.11"
+      - name: Syntax check
         run: |
-          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
-          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
-          cargo build --locked --release --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
-          # Record raw binary hash before strip as provenance input is source, after strip is installed artifact
-          sha256sum "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}" | tee "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.pre-strip.sha256"
-      - name: Package bridge (reproducible tar + binary)
+          python -m py_compile bridge/python/*.py
+          echo "py_compile OK"
+      - name: Ping test
         run: |
-          strip "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
-          sha256sum "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}" | awk '{print $1 "  ${{ matrix.binary }}"}' > "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256"
-          cat "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256"
-          tar --sort=name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" "${{ matrix.binary }}"
-          sha256sum "${{ matrix.asset }}" | tee -a sha256.txt
-          # Keep both tarball hash and raw binary hash for attestation
-          ls -lh "${{ matrix.asset }}" "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
-      - name: Attest raw binary (exact installed artifact)
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.3 peeled
-        with:
-          subject-path: "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
-          subject-name: "${{ matrix.asset }}.binary"
-      - name: Attest release archive
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
-        with:
-          subject-path: "${{ matrix.asset }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ matrix.asset }}
-          path: |
-            ${{ matrix.asset }}
-            bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256
-            bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.pre-strip.sha256
+          python bridge/python/__main__.py '{"cmd":"ping"}' | grep -q '"ok":true'
+          echo "ping OK"
+      - name: Crypto unit test (deterministic)
+        run: |
+          python -c "
+          from bridge.python.crypto import generate_x_client_token, generate_x_tr_signature, sorted_query_string, build_canonical_string
+          assert sorted_query_string('https://api.example.com/endpoint?b=2&a=1&c=3') == 'a=1&b=2&c=3'
+          assert sorted_query_string('https://api.example.com/endpoint') == ''
+          tok = generate_x_client_token(1700000000000)
+          assert tok.split(',')[0] == '1700000000000' and len(tok.split(',')[1]) == 32
+          sig = generate_x_tr_signature('GET','application/json','application/json','https://api.example.com/path?tab=1&page=2',None,1700000000000)
+          assert sig.split('|')[0] == '1700000000000' and sig.split('|')[1] == '2'
+          print('crypto tests passed')
+          "
+      - name: Search/Details mock (no network, just import)
+        run: |
+          python -c "from bridge.python.models import is_trailer_title; assert is_trailer_title('Trailer-Breaking Bad'); print('models ok')"
+          python -c "from bridge.python.titles import clean_moviebox_title; assert clean_moviebox_title('[Dub] Attack on Titan') == 'Attack on Titan'; print('titles ok')"
 
+  # Optional release: no binary artifacts for python backend - just create GitHub release with source
   release:
-    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test-python-bridge
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-      id-token: write
-      attestations: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: OmaMovie_Linux_*.tar.gz
-          merge-multiple: true
-      - name: Create checksums
-        run: sha256sum OmaMovie_Linux_*.tar.gz > SHA256SUMS && cat SHA256SUMS
-      - name: Attest SHA256SUMS (binds all archives to source)
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
-        with:
-          subject-path: "SHA256SUMS"
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.2.1
+      - uses: actions/checkout@v4
+      - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            OmaMovie_Linux_*.tar.gz
-            SHA256SUMS
+            bridge/python/*.py
+            README.md

@@ -26,12 +26,14 @@ Add and enable the plugin:
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-That single command clones the plugin (bridge binary already included in git), enables its bar widget, installs the
-matching prebuilt bridge, verifies `SHA256SUMS`, and stores it privately under
+That single command clones the plugin (bridge binary already included in git for fast install), enables its bar widget, installs the
+matching prebuilt bridge, verifies its `prebuilt/$ARCH/omamovie-bridge.sha256` sidecar and release `SHA256SUMS` (plus optional SLSA attestation via `gh attestation verify`), and stores it privately under
 `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. The Omarchy shell
 restarts automatically as soon as installation finishes. Click the bar icon;
 if you click during the brief first-run install, the panel opens by itself
 once installation completes.
+
+For auditors: set `OMAMOVIE_BUILD_FROM_SOURCE=1` to force a local reproducible `cargo build --frozen` from `bridge/` (pinned `bridge/rust-toolchain.toml` `1.85.0`) instead of using the prebuilt ELF. Strict attestation mode is `OMAMOVIE_VERIFY_ATTESTATION=1 OMAMOVIE_ATTESTATION_STRICT=1` (requires `gh` CLI).
 
 Click the **movie** icon in the bar (󰨂): search, pick a title, choose a
 stream (resolution / codec / size), Play. Series get a season + episode
@@ -91,17 +93,31 @@ omamovie/
   manifest.json          # bar-widget metadata (id tenzin.omamovie)
   BarWidget.qml          # bar icon -> panel
   Panel.qml              # the OmaMovie UI (search/grid/details/play)
-  omamovie-setup.sh      # installs prebuilt bridge; release download as fallback
+  omamovie-setup.sh      # installs prebuilt bridge; release download as fallback; verifies .sha256 + SLSA
   bridge/
     Cargo.toml           # pins moviebox-tui (rev 90acb82c)
+    rust-toolchain.toml  # pins Rust 1.85.0 for reproducible local/CI builds
     src/main.rs          # JSON bridge over the upstream engine
+  prebuilt/x64|arm64/    # stripped ELFs + .sha256 sidecars committed by CI
   README.md  LICENSE
 ```
 
 Bridge binaries are built once by GitHub Actions for x86_64 and arm64 whenever
-a `v*` tag is pushed. They are stripped, compressed, published with
-`SHA256SUMS`, and reused by every installation; users do not need Rust or the
-large Cargo build directory.
+a `v*` tag is pushed. They are built reproducibly (`bridge/rust-toolchain.toml` `1.85.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --frozen --locked`), stripped, compressed with reproducible `tar --sort-name --mtime`, published with `SHA256SUMS` and SLSA provenance (`actions/attest-build-provenance`), and committed to `prebuilt/` with `.sha256` sidecars. Users do not need Rust by default; set `OMAMOVIE_BUILD_FROM_SOURCE=1` for a fully local build.
+
+### Reproducible verification
+
+```bash
+# Pin toolchain matches CI
+cat bridge/rust-toolchain.toml
+# Rebuild locally and compare to prebuilt
+cargo build --frozen --locked --release --manifest-path bridge/Cargo.toml --target x86_64-unknown-linux-gnu
+sha256sum bridge/target/x86_64-unknown-linux-gnu/release/omamovie-bridge
+cat prebuilt/x64/omamovie-bridge.sha256
+# Or verify release attestation (requires gh CLI)
+gh attestation verify prebuilt/x64/omamovie-bridge --repo yesheytenzin/omamovie
+gh attestation verify OmaMovie_Linux_x64.tar.gz --repo yesheytenzin/omamovie
+```
 
 ## Legal note
 

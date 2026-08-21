@@ -26,14 +26,9 @@ Add and enable the plugin:
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-That single command clones the plugin (bridge binary already included in git for fast install), enables its bar widget, installs the
-matching prebuilt bridge, verifies its `prebuilt/$ARCH/omamovie-bridge.sha256` sidecar and release `SHA256SUMS` (plus optional SLSA attestation via `gh attestation verify`), and stores it privately under
-`~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. The Omarchy shell
-restarts automatically as soon as installation finishes. Click the bar icon;
-if you click during the brief first-run install, the panel opens by itself
-once installation completes.
+That single command clones the plugin, enables its bar widget, and installs the bridge **built reproducibly from locked source by default** (`bridge/rust-toolchain.toml` `1.85.0`, `cargo --locked`, `SOURCE_DATE_EPOCH`, `Cargo.lock` pinned `moviebox-tui@90acb82c`). If `cargo` is present it builds locally; otherwise it downloads the attested release tarball `OmaMovie_Linux_$ARCH.tar.gz` and verifies `SHA256SUMS` **and** SLSA provenance (`actions/attest-build-provenance`, `gh attestation verify`) fail-closed before extracting to `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. No bundled ELF is executed without independent verification. The Omarchy shell restarts automatically; if you click during the brief first-run build/download, the panel opens once ready.
 
-For auditors: set `OMAMOVIE_BUILD_FROM_SOURCE=1` to force a local reproducible `cargo build --frozen` from `bridge/` (pinned `bridge/rust-toolchain.toml` `1.85.0`) instead of using the prebuilt ELF. Strict attestation mode is `OMAMOVIE_VERIFY_ATTESTATION=1 OMAMOVIE_ATTESTATION_STRICT=1` (requires `gh` CLI).
+Bundled `prebuilt/` ELFs from older releases are no longer shipped or trusted by default — they are ignored unless you explicitly `OMAMOVIE_ALLOW_PREBUILT=1` (then still verified against a SLSA bundle, fail-closed). To force a release download even when `cargo` exists: `OMAMOVIE_PREFER_RELEASE=1`.
 
 Click the **movie** icon in the bar (󰨂): search, pick a title, choose a
 stream (resolution / codec / size), Play. Series get a season + episode
@@ -46,8 +41,7 @@ omarchy plugin update tenzin.omamovie
 ```
 
 The Omarchy shell restarts automatically after each actual update. If
-`manifest.json` has a new version, the matching prebuilt bridge ships in git (`prebuilt/`); a release download is kept as fallback
-automatically.
+`manifest.json` has a new version, the bridge is rebuilt from source or the new attested release tarball is downloaded and verified fail-closed.
 
 ## Remove
 
@@ -93,30 +87,29 @@ omamovie/
   manifest.json          # bar-widget metadata (id tenzin.omamovie)
   BarWidget.qml          # bar icon -> panel
   Panel.qml              # the OmaMovie UI (search/grid/details/play)
-  omamovie-setup.sh      # installs prebuilt bridge; release download as fallback; verifies .sha256 + SLSA
+  omamovie-setup.sh      # default builds from locked source; fallback downloads attested release (fail-closed)
   bridge/
     Cargo.toml           # pins moviebox-tui (rev 90acb82c)
+    Cargo.lock           # fully locked deps
     rust-toolchain.toml  # pins Rust 1.85.0 for reproducible local/CI builds
     src/main.rs          # JSON bridge over the upstream engine
-  prebuilt/x64|arm64/    # stripped ELFs + .sha256 sidecars committed by CI
+  .github/workflows/release.yml # pinned action SHAs, SLSA attest of raw binary + tarball
   README.md  LICENSE
 ```
 
-Bridge binaries are built once by GitHub Actions for x86_64 and arm64 whenever
-a `v*` tag is pushed. They are built reproducibly (`bridge/rust-toolchain.toml` `1.85.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --frozen --locked`), stripped, compressed with reproducible `tar --sort-name --mtime`, published with `SHA256SUMS` and SLSA provenance (`actions/attest-build-provenance`), and committed to `prebuilt/` with `.sha256` sidecars. Users do not need Rust by default; set `OMAMOVIE_BUILD_FROM_SOURCE=1` for a fully local build.
+Bridge binaries are built reproducibly in CI (`bridge/rust-toolchain.toml` `1.85.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --locked`, `RUSTFLAGS=-Cstrip=debuginfo`, `tar --sort-name --mtime --owner=0`) for `x86_64`+`aarch64` on each `v*` tag, and published as `OmaMovie_Linux_*.tar.gz` + `SHA256SUMS` with SLSA provenance (`actions/attest-build-provenance` pinned to commit SHAs, `id-token`/`attestations: write` least-privilege). The default install builds from source; the fallback verifies `SHA256SUMS` and the tarball’s SLSA attestation (`gh attestation verify`) fail-closed before extracting — the exact installed binary is thus bound to the reviewed source revision. No bundled `prebuilt/` ELF is trusted by default.
 
 ### Reproducible verification
 
 ```bash
-# Pin toolchain matches CI
-cat bridge/rust-toolchain.toml
-# Rebuild locally and compare to prebuilt
-cargo build --frozen --locked --release --manifest-path bridge/Cargo.toml --target x86_64-unknown-linux-gnu
-sha256sum bridge/target/x86_64-unknown-linux-gnu/release/omamovie-bridge
-cat prebuilt/x64/omamovie-bridge.sha256
-# Or verify release attestation (requires gh CLI)
-gh attestation verify prebuilt/x64/omamovie-bridge --repo yesheytenzin/omamovie
+cat bridge/rust-toolchain.toml  # 1.85.0
+cargo build --locked --release --manifest-path bridge/Cargo.toml --target x86_64-unknown-linux-gnu
+sha256sum bridge/target/x86_64-unknown-linux-gnu/release/omamovie-bridge  # compare to attested binary
+# Verify a release artifact’s provenance (requires gh CLI)
 gh attestation verify OmaMovie_Linux_x64.tar.gz --repo yesheytenzin/omamovie
+gh attestation verify SHA256SUMS --repo yesheytenzin/omamovie
+# Strict mode (fail if gh missing or attestation fails):
+# OMAMOVIE_ATTESTATION_STRICT=1 omamovie-setup.sh
 ```
 
 ## Legal note

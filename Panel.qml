@@ -6,6 +6,35 @@ import Quickshell.Io
 import QtMultimedia
 import qs.Commons
 import qs.Ui
+function sanitize(s) {
+    if (!s) return "";
+    return String(s).replace(/<[^>]*>/g, "");
+}
+
+function sanitizeDetails(d) {
+    if (!d) return null;
+    var out = {};
+    for (var k in d) {
+        var v = d[k];
+        if (typeof v === "string") out[k] = sanitize(v);
+        else if (Array.isArray(v)) out[k] = v.map(function(x) { return typeof x === "string" ? sanitize(x) : x; });
+        else out[k] = v;
+    }
+    return out;
+}
+
+function sanitizeStreams(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.map(function(s) {
+        var out = {};
+        for (var k in s) {
+            var v = s[k];
+            if (typeof v === "string") out[k] = sanitize(v);
+            else out[k] = v;
+        }
+        return out;
+    });
+}
 
 Panel {
     id: root
@@ -142,7 +171,7 @@ Panel {
             resultModel.clear();
             for (var i = 0; i < root.results.length; i++) {
                 var r = root.results[i];
-                resultModel.append({ id: r.id, title: r.title, year: r.year || "", rating: r.rating !== null ? String(r.rating) : "-", cover: r.cover || "", coverPath: r.cover || "", duration: r.duration || "", stype: r.stype });
+                resultModel.append({ id: sanitize(r.id), title: sanitize(r.title), year: sanitize(r.year || ""), rating: sanitize(r.rating !== null ? String(r.rating) : "-"), cover: sanitize(r.cover || ""), coverPath: sanitize(r.cover || ""), duration: sanitize(r.duration || ""), stype: sanitize(r.stype || "") });
             }
             root.view = "grid";
             root.statusText = resultModel.count + " results for \u201C" + q + "\u201D";
@@ -156,8 +185,8 @@ Panel {
     function openDetails(idx) {
         if (idx < 0 || idx >= resultModel.count) return;
         var it = resultModel.get(idx);
-        root.currentId = it.id;
-        root.currentTitle = it.title;
+        root.currentId = sanitize(it.id);
+        root.currentTitle = sanitize(it.title);
         // optimistic — switch immediately for snappy feel
         root.details = null;
         root.seasons = [];
@@ -180,7 +209,7 @@ Panel {
             if (gen !== root.detailGen) return;
             if (root.currentId !== it.id) return;
             if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
-                root.streams = resp.items;
+                root.streams = sanitizeStreams(resp.items);
                 root.selStream = 0;
                 root.statusText = "Pick a stream and press Play";
                 root.busy = false;
@@ -193,7 +222,7 @@ Panel {
                 root.statusText = (resp && resp.error) || "Details failed";
                 return;
             }
-            root.details = resp.value;
+            root.details = sanitizeDetails(resp.value);
             var ss = (resp.value && resp.value.seasons && resp.value.seasons.seasons) || [];
             root.seasons = ss.length ? ss : [];
             root.curSeason = 1;
@@ -224,8 +253,8 @@ Panel {
     function openHomeDetails(idx) {
         if (idx < 0 || idx >= homeModel.count) return;
         var it = homeModel.get(idx);
-        root.currentId = it.id;
-        root.currentTitle = it.title;
+        root.currentId = sanitize(it.id);
+        root.currentTitle = sanitize(it.title);
         root.details = null;
         root.seasons = [];
         root.streams = [];
@@ -245,7 +274,7 @@ Panel {
             if (gen !== root.detailGen) return;
             if (root.currentId !== it.id) return;
             if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
-                root.streams = resp.items;
+                root.streams = sanitizeStreams(resp.items);
                 root.selStream = 0;
                 root.statusText = "Pick a stream and press Play";
                 root.busy = false;
@@ -258,7 +287,7 @@ Panel {
                 root.statusText = (resp && resp.error) || "Details failed";
                 return;
             }
-            root.details = resp.value;
+            root.details = sanitizeDetails(resp.value);
             var ss = (resp.value && resp.value.seasons && resp.value.seasons.seasons) || [];
             root.seasons = ss.length ? ss : [];
             root.curSeason = 1;
@@ -292,7 +321,7 @@ Panel {
         request("resources", { id: root.currentId, season: se, episode: ep, perPage: 20 }, function(resp, code) {
             if (gen !== root.resourceGen) return;
             root.busy = false;
-            root.streams = (resp && resp.ok && resp.items) ? resp.items : [];
+            root.streams = sanitizeStreams((resp && resp.ok && resp.items) ? resp.items : []);
             root.selStream = root.streams.length > 0 ? 0 : -1;
             if (root.streams.length === 0)
                 root.statusText = "No streams available for this \u2026";
@@ -417,7 +446,7 @@ Panel {
             homeModel.clear();
             for (var k = 0; k < items.length && k < 24; k++) {
                 var r = items[k];
-                homeModel.append({ id: r.id, title: r.title, year: r.year || "", rating: r.rating !== null ? String(r.rating) : "-", cover: r.cover || "", coverPath: r.cover || "", duration: r.duration || "", stype: r.stype });
+                homeModel.append({ id: sanitize(r.id), title: sanitize(r.title), year: sanitize(r.year || ""), rating: sanitize(r.rating !== null ? String(r.rating) : "-"), cover: sanitize(r.cover || ""), coverPath: sanitize(r.cover || ""), duration: sanitize(r.duration || ""), stype: sanitize(r.stype || "") });
             }
             root.view = "home";
             root.statusText = homeModel.count ? "Discover \u2022 " + homeModel.count + " titles" : "Search movies, shows and anime";
@@ -513,7 +542,7 @@ Panel {
                 suggestionModel.clear();
                 var list = (resp && resp.ok && resp.suggestions) ? resp.suggestions : [];
                 for (var i = 0; i < list.length && i < 8; i++)
-                    suggestionModel.append({ name: list[i].name });
+                    suggestionModel.append({ name: sanitize(list[i].name) });
             });
         }
     }
@@ -575,12 +604,14 @@ Panel {
                             SequentialAnimation on opacity { running: root.busy; loops: Animation.Infinite; NumberAnimation { from: 0.4; to: 1.0; duration: 700 } NumberAnimation { from: 1.0; to: 0.4; duration: 700 } }
                         }
                         Text {
+                            textFormat: Text.PlainText
                             text: root.busy ? root.busyLabel : "Playing"
                             font.family: Style.font.family; font.pixelSize: Style.font.caption; color: Color.accent
                         }
                     }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: root.statusText
                     font.family: Style.font.family; font.pixelSize: Style.font.caption - 1; color: Qt.darker(Color.foreground, 1.35)
                     elide: Text.ElideRight; Layout.fillWidth: true; maximumLineCount: 1
@@ -732,6 +763,7 @@ Panel {
                                 }
                                 Text {
                                     width: parent.width
+                                    textFormat: Text.PlainText
                                     text: model.title
                                     elide: Text.ElideRight
                                     font.family: Style.font.family
@@ -740,7 +772,8 @@ Panel {
                                     maximumLineCount: 1
                                 }
                                 Text {
-                                    width: parent.width
+                                Text {
+                                    textFormat: Text.PlainText
                                     text: (model.year ? model.year : "\u2013") + "  \u2605 " + model.rating
                                     elide: Text.ElideRight
                                     font.family: Style.font.family
@@ -852,6 +885,7 @@ Panel {
                         }
                         Text {
                             width: parent.width
+                            textFormat: Text.PlainText
                             text: model.title
                             elide: Text.ElideRight
                             font.family: Style.font.family
@@ -860,7 +894,8 @@ Panel {
                             maximumLineCount: 1
                         }
                         Text {
-                            width: parent.width
+                        Text {
+                            textFormat: Text.PlainText
                             text: (model.year ? model.year : "\u2013") + "  \u2605 " + model.rating
                             elide: Text.ElideRight
                             font.family: Style.font.family
@@ -931,6 +966,7 @@ Panel {
                             spacing: 8
                             Text {
                                 Layout.fillWidth: true
+                                textFormat: Text.PlainText
                                 text: root.currentTitle
                                 elide: Text.ElideRight
                                 font.family: Style.font.family
@@ -946,6 +982,7 @@ Panel {
                         }
 
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: {
                                 if (!root.details) return "";
@@ -967,6 +1004,7 @@ Panel {
                         Text {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 48
+                            textFormat: Text.PlainText
                             text: (root.details && (root.details.intro || root.details.description || root.details.contentRating || "")) || ""
                             wrapMode: Text.WordWrap
                             elide: Text.ElideRight
@@ -1061,6 +1099,7 @@ Panel {
                             Layout.bottomMargin: 10
                             Text {
                                 Layout.fillWidth: true
+                                textFormat: Text.PlainText
                                 text: root.statusText
                                 elide: Text.ElideRight
                                 font.family: Style.font.family
@@ -1091,6 +1130,7 @@ Panel {
                         spacing: 8
                         Text {
                             Layout.fillWidth: true
+                            textFormat: Text.PlainText
                             text: root.playerTitle || "Player"
                             elide: Text.ElideRight
                             font.family: Style.font.family
@@ -1185,6 +1225,7 @@ Panel {
                     }
                     Text {
                         Layout.fillWidth: true
+                        textFormat: Text.PlainText
                         text: root.statusText
                         elide: Text.ElideRight
                         font.family: Style.font.family
@@ -1218,7 +1259,7 @@ Panel {
             height: 48; color: "#80000000"; visible: fullscreenWindow.visible
             RowLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 10
-                Text { Layout.fillWidth: true; text: root.playerTitle || "Player"; color: "white"; font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight }
+                Text { Layout.fillWidth: true; textFormat: Text.PlainText; text: root.playerTitle || "Player"; color: "white"; font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight }
                 Button { text: "✕ Exit Full"; fontSize: Style.font.caption; onClicked: root.playerFullscreen = false }
                 Button { text: "X"; fontSize: Style.font.caption; onClicked: root.close() }
             }

@@ -76,6 +76,14 @@ Panel {
     property string playerTitle: ""
     property bool embeddedPlaying: false
     property bool playerFullscreen: false
+    property string selectedGenre: ""
+    property int genreGen: 0
+
+    readonly property var genres: [
+        "All", "Action", "Comedy", "Drama", "Horror", "Sci-Fi",
+        "Thriller", "Romance", "Animation", "Documentary", "Fantasy",
+        "Mystery", "Adventure", "Crime", "Family"
+    ]
 
     readonly property bool isSeries: root.details ? (root.details.subjectType === 2 || root.seasons.length > 0) : false
 
@@ -456,8 +464,39 @@ Panel {
     function goHome() {
         if (homeModel.count === 0) root.loadHome(false);
         else root.view = "home";
+        root.selectedGenre = "";
         if (root.view === "home" && homeModel.count) root.statusText = "Discover \u2022 " + homeModel.count + " titles";
         else root.statusText = "Search movies, shows and anime";
+    }
+
+    function searchByGenre(genre) {
+        if (genre === "All" || genre === "") {
+            root.selectedGenre = "";
+            root.loadHome(true);
+            return;
+        }
+        root.selectedGenre = genre;
+        root.busy = true;
+        root.busyLabel = "Loading " + genre + " \u2026";
+        root.statusText = "";
+        root.genreGen++;
+        var gen = root.genreGen;
+        request("search", { q: genre, page: 1 }, function(resp, code) {
+            if (gen !== root.genreGen) return;
+            root.busy = false;
+            if (!resp || !resp.ok) {
+                root.statusText = (resp && resp.error) || "Search failed";
+                return;
+            }
+            root.results = resp.items || [];
+            resultModel.clear();
+            for (var i = 0; i < root.results.length; i++) {
+                var r = root.results[i];
+                resultModel.append({ id: sanitize(r.id), title: sanitize(r.title), year: sanitize(r.year || ""), rating: sanitize(r.rating !== null ? String(r.rating) : "-"), cover: sanitize(r.cover || ""), coverPath: sanitize(r.cover || ""), duration: sanitize(r.duration || ""), stype: sanitize(r.stype || "") });
+            }
+            root.view = "grid";
+            root.statusText = resultModel.count + " " + genre + " titles";
+        });
     }
 
     function backToGrid() {
@@ -466,7 +505,10 @@ Panel {
 
     function refreshCurrent() {
         if (root.view === "home") root.loadHome(true);
-        else if (root.view === "grid") root.doSearch();
+        else if (root.view === "grid") {
+            if (root.selectedGenre) root.searchByGenre(root.selectedGenre);
+            else root.doSearch();
+        }
         else if (root.view === "details" && root.currentId) {
             // reload details and streams for current item
             var idx = -1;
@@ -705,6 +747,22 @@ Panel {
                             font.pixelSize: Style.font.body
                             font.bold: true
                             color: Color.accent
+                        }
+                    }
+                    // Genre selector
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Repeater {
+                            model: root.genres
+                            Button {
+                                text: modelData
+                                fontSize: Style.font.caption
+                                horizontalPadding: 10
+                                verticalPadding: 4
+                                selected: root.selectedGenre === modelData || (modelData === "All" && root.selectedGenre === "")
+                                onClicked: root.searchByGenre(modelData)
+                            }
                         }
                     }
                     GridView {
@@ -1202,6 +1260,7 @@ Panel {
                             onMoved: function(v) { embeddedPlayer.position = v; }
                         }
                         Text {
+                            textFormat: Text.PlainText
                             text: {
                                 function fmt(ms) {
                                     if (!ms || ms < 0) return "0:00";
@@ -1281,6 +1340,7 @@ Panel {
                     onMoved: function(v) { embeddedPlayer.position = v; }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: {
                         function fmt(ms){ if(!ms||ms<0) return "0:00"; var s=Math.floor(ms/1000); var m=Math.floor(s/60); var sec=s%60; return m+":"+(sec<10?"0"+sec:sec); }
                         return fmt(embeddedPlayer.position)+" / "+fmt(embeddedPlayer.duration);

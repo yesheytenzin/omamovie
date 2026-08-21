@@ -19,91 +19,61 @@ jobs:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             asset: OmaMovie_Linux_x64.tar.gz
+            binary: omamovie-bridge
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             asset: OmaMovie_Linux_arm64.tar.gz
+            binary: omamovie-bridge
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master pinned 2026-08-21
         with:
           toolchain: 1.85.0
           targets: ${{ matrix.target }}
-      - name: Build bridge (reproducible)
+      - name: Build bridge (reproducible, locked)
         env:
           SOURCE_DATE_EPOCH: 0
           CARGO_INCREMENTAL: 0
           RUSTFLAGS: "-Cstrip=debuginfo"
           CARGO_TERM_COLOR: never
         run: |
-          # Pin epoch to commit timestamp for reproducibility
           export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
           echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           cargo build --locked --release --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
-      - name: Package bridge
+          # Record raw binary hash before strip as provenance input is source, after strip is installed artifact
+          sha256sum "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}" | tee "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.pre-strip.sha256"
+      - name: Package bridge (reproducible tar + binary)
         run: |
-          strip "bridge/target/${{ matrix.target }}/release/omamovie-bridge"
-          # Reproducible tar: sorted, fixed mtime/owner
-          tar --sort-name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" omamovie-bridge
+          strip "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          sha256sum "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}" | awk '{print $1 "  ${{ matrix.binary }}"}' > "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256"
+          cat "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256"
+          tar --sort-name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" "${{ matrix.binary }}"
           sha256sum "${{ matrix.asset }}" | tee -a sha256.txt
-          sha256sum "bridge/target/${{ matrix.target }}/release/omamovie-bridge" | awk '{print $1}' > "bridge/target/${{ matrix.target }}/release/omamovie-bridge.sha256"
-      - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@v2
+          # Keep both tarball hash and raw binary hash for attestation
+          ls -lh "${{ matrix.asset }}" "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
+      - name: Attest raw binary (exact installed artifact)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.3 peeled
+        with:
+          subject-path: "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          subject-name: "${{ matrix.asset }}.binary"
+      - name: Attest release archive
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: "${{ matrix.asset }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.asset }}
           path: |
             ${{ matrix.asset }}
-            bridge/target/${{ matrix.target }}/release/omamovie-bridge.sha256
-
-  commit-prebuilt:
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: OmaMovie_Linux_*.tar.gz
-          merge-multiple: true
-          path: artifacts
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: "*.sha256"
-          merge-multiple: true
-          path: artifacts-sha
-      - name: Stage prebuilt binaries
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p "prebuilt/x64" "prebuilt/arm64"
-          tar -xzf "artifacts/OmaMovie_Linux_x64.tar.gz" -C "prebuilt/x64"
-          tar -xzf "artifacts/OmaMovie_Linux_arm64.tar.gz" -C "prebuilt/arm64"
-          chmod +x "prebuilt/x64/omamovie-bridge" "prebuilt/arm64/omamovie-bridge"
-          printf '%s\n' "$VERSION" > "prebuilt/x64/version"
-          printf '%s\n' "$VERSION" > "prebuilt/arm64/version"
-          # Store binary hash for offline verification of git-tracked prebuilt
-          sha256sum "prebuilt/x64/omamovie-bridge" | awk '{print $1 "  omamovie-bridge"}' > "prebuilt/x64/omamovie-bridge.sha256"
-          sha256sum "prebuilt/arm64/omamovie-bridge" | awk '{print $1 "  omamovie-bridge"}' > "prebuilt/arm64/omamovie-bridge.sha256"
-          # Also copy raw sha256 from build for audit
-          if [ -f "artifacts-sha/omamovie-bridge.sha256" ]; then
-            echo "Build artifact sha(s):"
-            cat artifacts-sha/*.sha256 || true
-          fi
-          echo "Prebuilt hashes:"
-          cat prebuilt/x64/omamovie-bridge.sha256
-          cat prebuilt/arm64/omamovie-bridge.sha256
-      - name: Commit and push prebuilt
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add prebuilt
-          git commit -m "Ship prebuilt omamovie-bridge v${GITHUB_REF_NAME#v}" || echo "nothing to commit"
-          git push origin main
+            bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256
+            bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.pre-strip.sha256
 
   release:
     needs: build
@@ -113,17 +83,17 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: OmaMovie_Linux_*.tar.gz
           merge-multiple: true
       - name: Create checksums
-        run: sha256sum OmaMovie_Linux_*.tar.gz > SHA256SUMS
-      - name: Attest SHA256SUMS
-        uses: actions/attest-build-provenance@v2
+        run: sha256sum OmaMovie_Linux_*.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - name: Attest SHA256SUMS (binds all archives to source)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: "SHA256SUMS"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.2.1
         with:
           generate_release_notes: true
           files: |

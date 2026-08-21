@@ -87,6 +87,8 @@ Panel {
     ]
 
     readonly property bool isSeries: root.details ? (root.details.subjectType === 2 || root.seasons.length > 0) : false
+    property bool streamsBusy: false
+    property int streamsGen: 0
 
     // ---------------- bridge IPC (single serialized process) ----------------
     property var pending: []
@@ -129,6 +131,34 @@ Panel {
         }
     }
 
+    // dedicated streams process — bypasses main queue so E1 loads instantly even when details pending
+    Process {
+        id: streamsProc
+        property string collected: ""
+        property var pendingCb: null
+        stdout: SplitParser { onRead: function(data) { streamsProc.collected += data } }
+        onExited: function(code, status) {
+            var cb = streamsProc.pendingCb;
+            streamsProc.pendingCb = null;
+            var resp = null;
+            try { resp = JSON.parse(streamsProc.collected); } catch (e) {}
+            if (cb) cb(resp, code);
+        }
+    }
+    function requestStreams(params, cb) {
+        // if streams proc busy, queue via main request to avoid overlap — rare
+        if (streamsProc.running) {
+            request("resources", params, cb);
+            return;
+        }
+        streamsProc.collected = "";
+        streamsProc.pendingCb = cb;
+        var req = JSON.parse(JSON.stringify(params));
+        req.cmd = "resources";
+        streamsProc.command = [root.bridge, JSON.stringify(req)];
+        streamsProc.running = true;
+    }
+
     // ---------------- helpers ----------------
     function fmtSize(s) {
         var n = parseInt(s || "0", 10);
@@ -159,10 +189,25 @@ Panel {
         return 1;
     }
 
+    // ---------------- recent search history (max 10, in-memory) ----------------
+    function pushHistory(q) {
+        q = String(q || "").trim();
+        if (!q) return;
+        // dedupe: remove existing then prepend
+        var found = -1;
+        for (var i = 0; i < historyModel.count; i++) {
+            if (historyModel.get(i).name.toLowerCase() === q.toLowerCase()) { found = i; break; }
+        }
+        if (found >= 0) historyModel.remove(found);
+        historyModel.insert(0, { name: root.sanitize(q) });
+        while (historyModel.count > 10) historyModel.remove(historyModel.count - 1);
+    }
+
     // ---------------- actions ----------------
     function doSearch() {
         var q = searchField.text.trim();
         if (!q) return;
+        root.pushHistory(q);
         root.query = q;
         root.selectedGenre = ""; // clear genre selection so bar shows All
         root.busy = true;
@@ -326,17 +371,58 @@ Panel {
 
     function loadStreams(se, ep) {
         root.busy = true;
+        root.streamsBusy = true;
         root.busyLabel = "Loading streams \u2026";
         root.resourceGen++;
+        root.streamsGen++;
         var gen = root.resourceGen;
-        request("resources", { id: root.currentId, season: se, episode: ep, perPage: 20 }, function(resp, code) {
-            if (gen !== root.resourceGen) return;
+        var sgen = root.streamsGen;
+        // status placeholder handled via streamsBusy + streams length in UI
+        if (root.isSeries) root.statusText = "Loading streams for S" + se + "E" + (ep || 1) + " \u2026";
+        else root.statusText = "Loading streams \u2026";
+        var params = { id: root.currentId, season: se, episode: ep, perPage: 20 };
+        var cb = function(resp, code) {
+            if (gen !== root.resourceGen || sgen !== root.streamsGen) return;
             root.busy = false;
-            root.streams = root.sanitizeStreams((resp && resp.ok && resp.items) ? resp.items : []);
+            root.streamsBusy = false;
+            var items = (resp && resp.ok && resp.items) ? resp.items : [];
+            root.streams = root.sanitizeStreams(items);
             root.selStream = root.streams.length > 0 ? 0 : -1;
-            if (root.streams.length === 0)
-                root.statusText = "No streams available for this \u2026";
-        });
+            if (root.streams.length === 0) {
+                // Sub->Dub auto-fallback: if no streams and details has dubs, try first alt subjectId
+                var dubs = (root.details && root.details.dubs) ? root.details.dubs : [];
+                var tried = false;
+                for (var i = 0; i < dubs.length; i++) {
+                    var d = dubs[i];
+                    var dubId = d.subjectId || d.id || "";
+                    var lan = d.lanName || d.language || "dub";
+                    if (dubId && dubId !== root.currentId) {
+                        tried = true;
+                        root.statusText = "No streams for S" + se + "E" + (ep || 1) + " — trying " + lan + " \u2026";
+                        // fire fallback via main queue (avoid streamsProc recursion)
+                        request("resources", { id: dubId, season: se, episode: ep, perPage: 20 }, function(r2) {
+                            if (gen !== root.resourceGen || sgen !== root.streamsGen) return;
+                            var it2 = (r2 && r2.ok && r2.items) ? r2.items : [];
+                            if (it2.length > 0) {
+                                root.streams = root.sanitizeStreams(it2);
+                                root.selStream = 0;
+                                root.statusText = "auto-switched to " + lan + " — " + root.streams.length + " streams";
+                            } else {
+                                root.statusText = "No streams for S" + se + "E" + (ep || 1) + " — tap again to retry";
+                            }
+                        });
+                        break;
+                    }
+                }
+                if (!tried) root.statusText = "No streams for S" + se + "E" + (ep || 1) + " — tap again to retry";
+                if (!root.isSeries) root.statusText = root.streams.length === 0 ? "No streams — tap again to retry" : root.statusText;
+            } else {
+                if (root.isSeries) root.statusText = root.streams.length + " streams for S" + se + "E" + (ep || 1) + " — pick one and press Play";
+                else root.statusText = root.streams.length + " streams — pick one and press Play";
+            }
+        };
+        // use dedicated proc for instant E1 load without blocking on details queue
+        root.requestStreams(params, cb);
     }
 
     function selectStream(i) {
@@ -596,6 +682,7 @@ Panel {
     // ---------------- UI ----------------
     ListModel { id: resultModel }
     ListModel { id: homeModel }
+    ListModel { id: historyModel }
 
     Timer {
         id: suggestTimer
@@ -715,8 +802,16 @@ Panel {
                 placeholderText: "Search movies, shows, anime \u2026"
                 onAccepted: root.doSearch()
                 onTextChanged: root.debounceSuggest()
-                // clear on Esc
-                Keys.onEscapePressed: { clear(); suggestionModel.clear(); }
+                Keys.onEscapePressed: function(event) {
+                    if (searchField.text.length > 0) {
+                        searchField.clear();
+                        suggestionModel.clear();
+                    } else {
+                        suggestionModel.clear();
+                        root.close();
+                    }
+                    event.accepted = true;
+                }
             }
             Button {
                 text: "Search"
@@ -739,6 +834,25 @@ Panel {
             visible: suggestionModel.count > 0
             Repeater {
                 model: suggestionModel
+                Button {
+                    text: model.name
+                    fontSize: Style.font.caption
+                    horizontalPadding: 10
+                    verticalPadding: 4
+                    onClicked: { searchField.text = model.name; root.doSearch(); }
+                }
+            }
+        }
+
+        // recent searches — chips row (max 10, click to re-search)
+        Flow {
+            id: historyFlow
+            Layout.fillWidth: true
+            spacing: 6
+            visible: historyModel.count > 0 && suggestionModel.count === 0 && (root.view === "home" || root.view === "grid")
+            Layout.preferredHeight: visible ? implicitHeight : 0
+            Repeater {
+                model: historyModel
                 Button {
                     text: model.name
                     fontSize: Style.font.caption
@@ -1163,6 +1277,7 @@ Panel {
                             boundsBehavior: Flickable.StopAtBounds
                             maximumFlickVelocity: 3500
                             reuseItems: true
+                            visible: root.streams.length > 0
                             model: root.streams
                             delegate: Button {
                                 width: parent ? parent.width : 0
@@ -1179,6 +1294,33 @@ Panel {
                                 selected: index === root.selStream
                                 fontSize: Style.font.caption
                                 onClicked: root.selectStream(index)
+                            }
+                        }
+                        // streams placeholder — visible when empty (loading vs no streams)
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            visible: root.streams.length === 0
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 20
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                wrapMode: Text.WordWrap
+                                textFormat: Text.PlainText
+                                text: root.streamsBusy
+                                      ? (root.isSeries ? ("Loading streams for S" + root.curSeason + "E" + (root.curEp || 1) + " \u2026") : "Loading streams \u2026")
+                                      : (root.isSeries ? ("No streams for S" + root.curSeason + "E" + (root.curEp || 1) + " — tap again to retry") : "No streams — tap again to retry")
+                                font.family: Style.font.family
+                                font.pixelSize: Style.font.caption
+                                color: root.streamsBusy ? Color.accent : Qt.darker(Color.foreground, 1.4)
+                                opacity: root.streamsBusy ? 0.9 : 0.8
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !root.streamsBusy && root.currentId !== ""
+                                onClicked: root.loadStreams(root.isSeries ? root.curSeason : 0, root.isSeries ? root.curEp : 0)
                             }
                         }
 
@@ -1387,5 +1529,13 @@ Panel {
             acceptedButtons: Qt.LeftButton
             onDoubleClicked: root.playerFullscreen = false
         }
+    }
+
+    // Esc from any view closes panel; searchField's own Keys handler clears field when focused
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.opened && !searchField.activeFocus
+        onActivated: root.close()
+        context: Qt.WindowShortcut
     }
 }

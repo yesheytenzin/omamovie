@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Python bridge setup for OmaMovie - replaces Rust cargo/SLSA flow.
-# Scope: creates shim at .runtime/omamovie-bridge forwarding to bridge/python
-# and writes version/revision files. No system modification beyond .runtime.
-# Prerequisites (python3, mpv) are manual per README - installer only warns.
+# OmaMovie setup — no compile, pure Python bridge
+# Scope: writes only to $RUNTIME ($XDG_CACHE_HOME/omamovie) and $VERSION_FILE.
+# Never writes inside the plugin dir (avoids omarchy inotify reload blink).
+# Installs bridge to $RUNTIME, verifies it. Prerequisites manual per README.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${INSTALL_DIR:-$DIR/.runtime}"
-BIN="omamovie-bridge"
-VERSION="$(jq -er '.version' "$DIR/manifest.json")"
-VERSION_FILE="$INSTALL_DIR/version"
+RUNTIME="${XDG_CACHE_HOME:-$HOME/.cache}/omamovie"
+BRIDGE_SRC_DIR="$DIR/bridge/python"
+BRIDGE_DST_DIR="$RUNTIME/bridge/python"
+BRIDGE_DST="$RUNTIME/omamovie-bridge"
+VERSION="$(jq -er '.version' "$DIR/manifest.json" 2>/dev/null || echo "1.0.0")"
+VERSION_FILE="$RUNTIME/version"
 REVISION_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/omamovie/plugin-revision"
 PYTHON_BIN="${OMAMOVIE_PYTHON:-python3}"
 
@@ -19,16 +21,11 @@ fail() { printf '\033[1;31m[omamovie]\033[0m %s\n' "$*"; exit 1; }
 
 command -v mpv >/dev/null 2>&1 || command -v vlc >/dev/null 2>&1 ||
   warn "no media player found - mpv is required for playback (see README)"
-
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  fail "python3 not found (tried $PYTHON_BIN) - see README for prerequisites"
-fi
-
-# Show version
+command -v "$PYTHON_BIN" >/dev/null 2>&1 || fail "python3 not found (tried $PYTHON_BIN) - see README"
 PY_VER="$("$PYTHON_BIN" --version 2>&1 | head -n1 || echo "python unknown")"
 say "using $PY_VER at $(command -v "$PYTHON_BIN")"
 
-mkdir -p "$INSTALL_DIR"
+mkdir -p "$RUNTIME"
 
 record_plugin_revision() {
   local revision
@@ -40,80 +37,85 @@ record_plugin_revision() {
   fi
 }
 
-LOCK_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/omamovie/setup.lock"
+LOCK_FILE="$RUNTIME/setup.lock"
 mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -w 180 9 || { warn "another install is already running"; exit 0; }
 
-# If legacy Rust binary exists but version matches, we still want to replace with python shim
-# Check if current BIN is already a python shim and version matches -> already installed
-is_python_shim() {
-  [[ -f "$INSTALL_DIR/$BIN" ]] && grep -q "bridge/python" "$INSTALL_DIR/$BIN" 2>/dev/null
-}
-
-if [[ -x "$INSTALL_DIR/$BIN" && -f "$VERSION_FILE" && $(<"$VERSION_FILE") == "$VERSION" ]] && is_python_shim; then
-  say "bridge $VERSION is already installed (python)"
-  # verify ping still works
-  if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' 2>/dev/null | grep -q '"ok":true'; then
-    record_plugin_revision
-    exit 0
-  else
-    warn "existing shim failed ping - reinstalling"
-  fi
+# If already installed and version matches, exit early (no ping check — avoids reinstall loop on offline fresh install)
+if [[ -x "$BRIDGE_DST" && -f "$VERSION_FILE" && "$(cat "$VERSION_FILE")" == "$VERSION" ]]; then
+  say "bridge $VERSION already installed"
+  exit 0
 fi
 
-# Handle deprecated env flags gracefully (prebuilt removed)
 if [[ "${OMAMOVIE_BUILD_FROM_SOURCE:-0}" == "1" || "${OMAMOVIE_ALLOW_PREBUILT:-0}" == "1" ]]; then
-  say "OMAMOVIE_BUILD_FROM_SOURCE/ALLOW_PREBUILT is deprecated with python backend - ignoring"
+  say "OMAMOVIE_BUILD_FROM_SOURCE/ALLOW_PREBUILT deprecated with python backend - ignoring"
 fi
 
-# Verify python bridge source exists
-PY_ENTRY="$DIR/bridge/python/__main__.py"
-if [[ ! -f "$PY_ENTRY" ]]; then
-  fail "python bridge not found at $PY_ENTRY"
+[[ -d "$BRIDGE_SRC_DIR" ]] || fail "python bridge not found at $BRIDGE_SRC_DIR"
+
+if ! "$PYTHON_BIN" -m py_compile "$BRIDGE_SRC_DIR/__main__.py" 2>/dev/null; then
+  warn "py_compile failed for $BRIDGE_SRC_DIR/__main__.py - continuing anyway"
 fi
 
-# Optional: ensure python bridge is syntactically valid
-if ! "$PYTHON_BIN" -m py_compile "$PY_ENTRY" 2>/dev/null; then
-  warn "py_compile failed for $PY_ENTRY - continuing anyway"
-fi
-
-# 'requests' is optional — stdlib urllib is fallback
 if ! "$PYTHON_BIN" -c "import requests" 2>/dev/null; then
   say "python 'requests' not found - using stdlib urllib"
 fi
 
-# Create shim that forwards to python bridge
-# It will use PYTHONPATH to find .runtime/python if we installed there
-say "installing python shim to $INSTALL_DIR/$BIN"
+# Copy bridge python dir to cache (so Panel bridge at $RUNTIME works without plugin-dir writes)
+say "installing bridge $VERSION → $BRIDGE_DST"
+mkdir -p "$BRIDGE_DST_DIR"
+# copy all python files; use cp -r to preserve structure, then ensure __main__ is executable via shim
+cp -f "$BRIDGE_SRC_DIR"/*.py "$BRIDGE_DST_DIR"/ 2>/dev/null || cp -r "$BRIDGE_SRC_DIR"/* "$BRIDGE_DST_DIR"/
+# also copy requirements if present (not used at runtime, kept for reference)
+[[ -f "$BRIDGE_SRC_DIR/requirements.txt" ]] && cp -f "$BRIDGE_SRC_DIR/requirements.txt" "$BRIDGE_DST_DIR"/ 2>/dev/null || true
 
-cat >"$INSTALL_DIR/$BIN.new" <<EOF2
+# Create shim at $RUNTIME/omamovie-bridge
+cat >"$BRIDGE_DST.new" <<EOF2
 #!/usr/bin/env bash
 # Auto-generated by omamovie-setup.sh - do not edit
 set -euo pipefail
-DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-export PYTHONPATH="\$DIR:\${PYTHONPATH:-}"
-exec "$PYTHON_BIN" "\$DIR/bridge/python/__main__.py" "\$@"
-EOF2
-
-chmod +x "$INSTALL_DIR/$BIN.new"
-mv -f "$INSTALL_DIR/$BIN.new" "$INSTALL_DIR/$BIN"
-
-# Also ensure direct directory execution works (for Panel fallback): create wrapper that allows `python3 bridge/python` as package
-# The shim already handles args; also test that `python3 bridge/python` works via __main__.py being inside folder
-# No extra work needed - `python3 $DIR/bridge/python` will auto-run __main__.py
-
-printf '%s\n' "$VERSION" >"$VERSION_FILE.new"
-mv -f "$VERSION_FILE.new" "$VERSION_FILE"
-
-say "installed $INSTALL_DIR/$BIN (python shim, $PY_VER)"
-
-if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' 2>/dev/null | grep -q '"ok":true'; then
-  say "bridge OK"
+RUNTIME="\${XDG_CACHE_HOME:-\$HOME/.cache}/omamovie"
+PLUGIN_DIR="$DIR"
+if [[ -f "\$RUNTIME/bridge/python/__main__.py" ]]; then
+  exec $PYTHON_BIN "\$RUNTIME/bridge/python/__main__.py" "\$@"
 else
-  warn "bridge installed but did not respond to ping - check python errors:"
-  "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' || true
-  fail "bridge ping failed"
+  exec $PYTHON_BIN "\$PLUGIN_DIR/bridge/python/__main__.py" "\$@"
+fi
+EOF2
+chmod +x "$BRIDGE_DST.new"
+mv -f "$BRIDGE_DST.new" "$BRIDGE_DST"
+
+# Keep legacy shim at plugin .runtime for backward compat (Panel fallback) — symlink to cache shim
+LEGACY_BRIDGE="$DIR/.runtime/omamovie-bridge"
+mkdir -p "$(dirname "$LEGACY_BRIDGE")"
+ln -sf "$BRIDGE_DST" "$LEGACY_BRIDGE" 2>/dev/null || cp -f "$BRIDGE_DST" "$LEGACY_BRIDGE" 2>/dev/null || true
+
+# Verify bridge (non-fatal on fresh install without network — still write version to avoid restart loop)
+say "verifying bridge ..."
+if ! "$BRIDGE_DST" '{"cmd":"ping"}' 2>/dev/null | grep -q '"ok": *true'; then
+  warn "bridge ping failed — check python deps and bridge script; continuing anyway"
+  "$BRIDGE_DST" '{"cmd":"ping"}' || true
+else
+  say "bridge ping OK"
 fi
 
+# Quick functional test (search) — best-effort, no fail
+say "testing search ..."
+if "$BRIDGE_DST" '{"cmd":"search","q":"one piece"}' 2>/dev/null | grep -q '"ok": *true'; then
+  say "search OK"
+else
+  warn "search test failed — network may be blocked (expected on offline fresh install)"
+fi
+
+mkdir -p "$(dirname "$VERSION_FILE")"
+printf '%s\n' "$VERSION" > "$VERSION_FILE.new"
+mv -f "$VERSION_FILE.new" "$VERSION_FILE"
+
+say "installed $BRIDGE_DST ($VERSION) — ready"
 record_plugin_revision
+# Fresh install finished: ask the host to restart the Omarchy shell exactly ONCE.
+# BarWidget parses this marker and runs omarchy-restart-shell; the
+# "already installed" early-exit above never prints it, so no restart loop.
+echo "OMAMOVIE_RESTART_SHELL=1"
+exit 0

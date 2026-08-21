@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -22,19 +24,38 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.85.0
           targets: ${{ matrix.target }}
-      - name: Build bridge
-        run: cargo build --release --locked --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
+      - name: Build bridge (reproducible)
+        env:
+          SOURCE_DATE_EPOCH: 0
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: "-Cstrip=debuginfo"
+          CARGO_TERM_COLOR: never
+        run: |
+          # Pin epoch to commit timestamp for reproducibility
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          cargo build --frozen --locked --release --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
       - name: Package bridge
         run: |
           strip "bridge/target/${{ matrix.target }}/release/omamovie-bridge"
-          tar -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" omamovie-bridge
+          # Reproducible tar: sorted, fixed mtime/owner
+          tar --sort-name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" omamovie-bridge
+          sha256sum "${{ matrix.asset }}" | tee -a sha256.txt
+          sha256sum "bridge/target/${{ matrix.target }}/release/omamovie-bridge" | awk '{print $1}' > "bridge/target/${{ matrix.target }}/release/omamovie-bridge.sha256"
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "${{ matrix.asset }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            bridge/target/${{ matrix.target }}/release/omamovie-bridge.sha256
 
   commit-prebuilt:
     needs: build
@@ -50,6 +71,11 @@ jobs:
           pattern: OmaMovie_Linux_*.tar.gz
           merge-multiple: true
           path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*.sha256"
+          merge-multiple: true
+          path: artifacts-sha
       - name: Stage prebuilt binaries
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -59,6 +85,17 @@ jobs:
           chmod +x "prebuilt/x64/omamovie-bridge" "prebuilt/arm64/omamovie-bridge"
           printf '%s\n' "$VERSION" > "prebuilt/x64/version"
           printf '%s\n' "$VERSION" > "prebuilt/arm64/version"
+          # Store binary hash for offline verification of git-tracked prebuilt
+          sha256sum "prebuilt/x64/omamovie-bridge" | awk '{print $1 "  omamovie-bridge"}' > "prebuilt/x64/omamovie-bridge.sha256"
+          sha256sum "prebuilt/arm64/omamovie-bridge" | awk '{print $1 "  omamovie-bridge"}' > "prebuilt/arm64/omamovie-bridge.sha256"
+          # Also copy raw sha256 from build for audit
+          if [ -f "artifacts-sha/omamovie-bridge.sha256" ]; then
+            echo "Build artifact sha(s):"
+            cat artifacts-sha/*.sha256 || true
+          fi
+          echo "Prebuilt hashes:"
+          cat prebuilt/x64/omamovie-bridge.sha256
+          cat prebuilt/arm64/omamovie-bridge.sha256
       - name: Commit and push prebuilt
         run: |
           git config user.name "github-actions[bot]"
@@ -70,6 +107,10 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -77,6 +118,10 @@ jobs:
           merge-multiple: true
       - name: Create checksums
         run: sha256sum OmaMovie_Linux_*.tar.gz > SHA256SUMS
+      - name: Attest SHA256SUMS
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "SHA256SUMS"
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true

@@ -18,6 +18,15 @@ say()  { printf '\033[1;36m[omamovie]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[omamovie]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[omamovie]\033[0m %s\n' "$*"; exit 1; }
 
+# Expected source identity for provenance — the exact reviewed commit/ref for this version.
+# After omarchy plugin add, HEAD is the tag's peeled commit (e.g., fa858a6 for v1.5.23, 7f19249 for v1.5.24).
+# This binds SLSA attestation to that exact commit; a rebuild from another commit will fail verification.
+EXPECTED_REF="refs/tags/v$VERSION"
+EXPECTED_COMMIT="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || git -C "$DIR" rev-parse "refs/tags/v$VERSION^{}" 2>/dev/null || cat "$DIR/.source_commit" 2>/dev/null || printf "")"
+if [[ -z "$EXPECTED_COMMIT" ]]; then
+  warn "could not determine expected source commit for v$VERSION — attestation will be checked for $EXPECTED_REF without digest (fallback to source build if gh missing)"
+fi
+
 if [[ -n "${OMAMOVIE_RELEASE_BASE:-}" ]]; then
   say "using custom release base: $RELEASE_BASE"
 fi
@@ -45,18 +54,37 @@ record_plugin_revision() {
 }
 
 verify_attestation() {
-  # Fail-closed verification of a subject against its SLSA attestation via gh CLI.
-  # Returns 0 on verified, 1 on failure. Caller decides strictness.
+  # Fail-closed SLSA verification bound to the exact reviewed source commit/ref.
+  # Uses gh attestation verify with --cert-identity (workflow) + --source-ref/digest.
+  # Returns 0 only if attestation is valid and its source equals EXPECTED_COMMIT/EXPECTED_REF.
   local subject="$1"
   if ! command -v gh >/dev/null 2>&1; then
-    warn "gh CLI not found — cannot verify SLSA attestation for $subject (install gh or set OMAMOVIE_ATTESTATION_STRICT=0 to allow SHA256-only)"
+    warn "gh CLI not found — cannot verify SLSA attestation for $subject"
     return 1
   fi
-  if gh attestation verify "$subject" --repo "yesheytenzin/omamovie" >/dev/null 2>&1; then
-    say "SLSA attestation verified for $subject"
+  local args=(--repo "yesheytenzin/omamovie")
+  # Require the release workflow identity (pinned workflow path at the expected tag)
+  args+=(--cert-identity-regex "^https://github.com/yesheytenzin/omamovie/.github/workflows/release.yml@refs/tags/v.*$")
+  # Constrain to the exact reviewed ref and digest — a rebuild from another commit will fail
+  if [[ -n "${EXPECTED_REF:-}" ]]; then
+    args+=(--source-ref "$EXPECTED_REF")
+  fi
+  if [[ -n "${EXPECTED_COMMIT:-}" && "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    args+=(--source-digest "$EXPECTED_COMMIT")
+  fi
+  if gh attestation verify "$subject" "${args[@]}" >/dev/null 2>&1; then
+    say "SLSA attestation verified for $subject (source $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12})"
     return 0
   else
-    warn "SLSA attestation verification failed for $subject"
+    # Fallback: try without source-digest (older gh) but still require cert identity + source-ref
+    if [[ -n "${EXPECTED_COMMIT:-}" ]]; then
+      warn "attestation verify with source-digest failed — retrying with source-ref only"
+      if gh attestation verify "$subject" --repo "yesheytenzin/omamovie" --cert-identity-regex "^https://github.com/yesheytenzin/omamovie/.github/workflows/release.yml@refs/tags/v.*$" --source-ref "$EXPECTED_REF" >/dev/null 2>&1; then
+        say "SLSA attestation verified for $subject (source $EXPECTED_REF, digest check skipped)"
+        return 0
+      fi
+    fi
+    warn "SLSA attestation verification failed for $subject (expected $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12})"
     return 1
   fi
 }
@@ -226,41 +254,29 @@ if ! (cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet); then
 fi
 say "SHA256SUMS verified (fail-closed)"
 
-# SLSA provenance for the exact archive (fail-closed) — reviewer e8e6d3c
-# The SHA256 is already verified above. For full provenance, verify the tarball's
-# SLSA attestation (binds exact bytes to git source revision via Sigstore).
-# Fast path remains fast: download + SHA256 (~2s) is fail-closed; attestation
-# adds ~1s when gh is present. If attestation fails, fallback to reproducible
-# source build (also fail-closed via source), rather than installing unverified.
+# SLSA provenance — fail-closed to exact reviewed commit/ref (fixes 7f19249)
+# SHA256 is already verified above, but SHA256SUMS is also from the same release
+# and not independent provenance. Require SLSA attestation bound to
+# EXPECTED_REF/EXPECTED_COMMIT (e.g., refs/tags/v1.5.24 @ 7f19249). If gh is
+# absent or attestation fails, do NOT install SHA256-only — fallback to
+# reproducible source build (or fail if cargo unavailable).
 if command -v gh >/dev/null 2>&1; then
   if verify_attestation "$TMP/$ARCHIVE"; then
-    say "release archive SLSA provenance verified (fail-closed)"
-    # Also verify SHA256SUMS attestation if present (optional)
-    if ! verify_attestation "$TMP/SHA256SUMS" 2>/dev/null; then
-      warn "SHA256SUMS attestation not verified (optional)"
-    fi
+    say "release archive SLSA provenance verified (fail-closed, $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12})"
   else
-    # Attestation failed — do not install unverified archive by default.
-    if [[ "${OMAMOVIE_ALLOW_UNVERIFIED_RELEASE:-0}" == "1" ]]; then
-      warn "proceeding without SLSA attestation (OMAMOVIE_ALLOW_UNVERIFIED_RELEASE=1, SHA256-only)"
-    else
-      warn "release attestation verification failed — trying reproducible source build fallback (fail-closed via source)"
-      if build_from_source; then
-        if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then say "bridge OK (built from source fallback)"; record_plugin_revision; exit 0; else fail "source-built bridge failed ping"; fi
-      else
-        fail "release attestation verification failed — refusing unverified archive (install gh or set OMAMOVIE_ALLOW_UNVERIFIED_RELEASE=1 to allow SHA256-only, or ensure cargo is available for source fallback)"
-      fi
-    fi
-  fi
-else
-  warn "gh not found — SHA256 verified but SLSA attestation not checked (install gh for full provenance; fallback to source build available)"
-  if [[ "${OMAMOVIE_ATTESTATION_STRICT:-0}" == "1" ]]; then
-    warn "strict attestation requested but gh not found — trying source build fallback"
+    warn "release attestation verification failed for $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12} — trying reproducible source build fallback (fail-closed via source)"
     if build_from_source; then
       if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then say "bridge OK (built from source fallback)"; record_plugin_revision; exit 0; else fail "source-built bridge failed ping"; fi
     else
-      fail "strict attestation required but gh not found and source build unavailable"
+      fail "release attestation verification failed for $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12} — refusing unverified archive (verified download requires gh attestation bound to exact commit; ensure gh is authenticated or use OMAMOVIE_BUILD_FROM_SOURCE=1)"
     fi
+  fi
+else
+  warn "gh not found — cannot verify SLSA attestation for $TMP/$ARCHIVE (expected $EXPECTED_REF @ ${EXPECTED_COMMIT:0:12}) — trying source build fallback"
+  if build_from_source; then
+    if "$INSTALL_DIR/$BIN" '{"cmd":"ping"}' | grep -q '"ok":true'; then say "bridge OK (built from source fallback)"; record_plugin_revision; exit 0; else fail "source-built bridge failed ping"; fi
+  else
+    fail "gh not found and source build unavailable — refusing SHA256-only install (install gh for attested download or cargo for source build)"
   fi
 fi
 

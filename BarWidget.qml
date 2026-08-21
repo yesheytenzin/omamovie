@@ -26,7 +26,6 @@ BarWidget {
         setupProc.setupOutput = "";
         setupProc.command = ["bash", root.setupScript];
         setupProc.running = true;
-        installNotifyTimer.restart();
     }
 
     function injectPanel() {
@@ -73,15 +72,6 @@ BarWidget {
             panelLoader.item.closeForPopoutSwitch();
     }
 
-    function notify(title, body, urgency) {
-        var u = urgency || "normal";
-        var t = title || "OmaMovie";
-        var b = body || "";
-        // Use notify-send if available; fallback silently if not
-        notifyProc.command = ["notify-send", "-a", "OmaMovie", "-u", u, "-i", "video-display", t, b];
-        notifyProc.running = true;
-    }
-
     onBarChanged: injectPanel()
     onSettingsChanged: injectPanel()
 
@@ -96,23 +86,15 @@ BarWidget {
             onRead: function(data) { setupProc.errorOutput += data + "\n" }
         }
         onExited: function(exitCode) {
-            installNotifyTimer.stop();
             root.installing = false;
             root.bridgeReady = exitCode === 0;
             if (!root.bridgeReady) {
                 root.bridgeError = setupProc.errorOutput.trim() || "Bridge installation failed";
-                notify("OmaMovie — Install failed", root.bridgeError, "critical");
                 return;
             }
             var out = setupProc.setupOutput;
-            var isFresh = out.indexOf("already installed") === -1 && (out.indexOf("downloading") !== -1 || out.indexOf("installed") !== -1);
-            if (isFresh) {
-                notify("OmaMovie — Ready", "Bridge installed — click the film icon () to browse", "normal");
-            }
             var restartScheduled = out.indexOf("OMAMOVIE_RESTART_SHELL=1") !== -1;
             if (restartScheduled) {
-                // The setup script scheduled a detached rescan (omarchy-shell shell rescanPlugins).
-                // Its replacement widget picks up any pending-open marker.
                 return;
             }
             if (root.userClickedInstall) {
@@ -138,21 +120,6 @@ BarWidget {
 
     Process {
         id: touchProc
-    }
-
-    Process {
-        id: notifyProc
-    }
-
-    Timer {
-        id: installNotifyTimer
-        interval: 600
-        repeat: false
-        onTriggered: {
-            if (root.installing && !root.bridgeReady) {
-                notify("OmaMovie", "Installing bridge… downloading", "normal");
-            }
-        }
     }
 
     Loader {

@@ -419,6 +419,10 @@ Panel {
             } else {
                 if (root.isSeries) root.statusText = root.streams.length + " streams for S" + se + "E" + (ep || 1) + " — pick one and press Play";
                 else root.statusText = root.streams.length + " streams — pick one and press Play";
+                // prefetch next episode for instant E+1 switch
+                if (root.isSeries && ep > 0 && ep < root.maxEp) {
+                    Qt.callLater(function(){ root.prefetchStreams(se, ep + 1); });
+                }
             }
         };
         // use dedicated proc for instant E1 load without blocking on details queue
@@ -435,6 +439,12 @@ Panel {
         stdout: SplitParser { onRead: function(data){ prefetchProc.collected += data } }
         onExited: function(code){ try{ JSON.parse(prefetchProc.collected);}catch(e){} }
     }
+    Process {
+        id: prefetchStreamsProc
+        property string collected: ""
+        stdout: SplitParser { onRead: function(data){ prefetchStreamsProc.collected += data } }
+        onExited: function(code){ try{ JSON.parse(prefetchStreamsProc.collected);}catch(e){} }
+    }
 
     function prefetchDetails(id) {
         if (!id || bridgeProc.running || root.pending.length > 0 || prefetchProc.running) return;
@@ -442,6 +452,16 @@ Panel {
         prefetchProc.collected = "";
         prefetchProc.command = [root.bridge, req];
         prefetchProc.running = true;
+    }
+    function prefetchStreams(se, ep) {
+        if (!root.currentId || !root.isSeries) return;
+        if (ep < 1 || ep > root.maxEp) return;
+        if (bridgeProc.running || root.pending.length > 0 || prefetchStreamsProc.running || streamsProc.running) return;
+        // only prefetch if next episode not yet cached in file system? we just fire and let bridge cache it
+        var req = JSON.stringify({ cmd: "resources", id: root.currentId, season: se, episode: ep, perPage: 20 });
+        prefetchStreamsProc.collected = "";
+        prefetchStreamsProc.command = [root.bridge, req];
+        prefetchStreamsProc.running = true;
     }
 
     function play() {
@@ -686,19 +706,46 @@ Panel {
 
     Timer {
         id: suggestTimer
-        interval: 380
+        interval: 220
         repeat: false
         onTriggered: {
             var q = searchField.text.trim();
             if (q.length < 2) { suggestionModel.clear(); return; }
+            // instant history prefix matches (no network)
+            var ql = q.toLowerCase();
+            var hist = [];
+            for (var hi = 0; hi < historyModel.count; hi++) {
+                var hn = historyModel.get(hi).name;
+                if (hn.toLowerCase().indexOf(ql) === 0) hist.push(hn);
+                if (hist.length >= 4) break;
+            }
+            if (hist.length > 0) {
+                suggestionModel.clear();
+                for (var h = 0; h < hist.length; h++) suggestionModel.append({ name: hist[h] });
+            }
             root.suggestGen++;
             var gen = root.suggestGen;
             request("suggest", { q: q }, function(resp) {
                 if (gen !== root.suggestGen) return;
-                suggestionModel.clear();
                 var list = (resp && resp.ok && resp.suggestions) ? resp.suggestions : [];
-                for (var i = 0; i < list.length && i < 8; i++)
-                    suggestionModel.append({ name: root.sanitize(list[i].name) });
+                // merge history + network, dedup
+                var seen = {};
+                for (var si = 0; si < suggestionModel.count; si++) seen[suggestionModel.get(si).name.toLowerCase()] = true;
+                // if hist was shown, keep it and append new network items not in hist
+                if (hist.length > 0 && suggestionModel.count > 0) {
+                    // clear and rebuild merged to keep hist first
+                    var merged = hist.slice();
+                    for (var i = 0; i < list.length && merged.length < 8; i++) {
+                        var n = root.sanitize(list[i].name);
+                        if (!seen[n.toLowerCase()]) { merged.push(n); seen[n.toLowerCase()] = true; }
+                    }
+                    suggestionModel.clear();
+                    for (var m = 0; m < merged.length; m++) suggestionModel.append({ name: merged[m] });
+                } else {
+                    suggestionModel.clear();
+                    for (var i2 = 0; i2 < list.length && i2 < 8; i2++)
+                        suggestionModel.append({ name: root.sanitize(list[i2].name) });
+                }
             });
         }
     }

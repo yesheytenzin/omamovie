@@ -808,7 +808,7 @@ Panel {
                                     Rectangle {
                                         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                                         height: 22; color: "#66000000"; visible: model.rating && model.rating !== "-"
-                                        Text { anchors.centerIn: parent; text: "\u2605 " + model.rating; font.family: Style.font.family; font.pixelSize: 10; color: "white"; font.bold: true}
+                                        Text { anchors.centerIn: parent; textFormat: Text.PlainText; text: "\u2605 " + model.rating; font.family: Style.font.family; font.pixelSize: 10; color: "white"; font.bold: true}
                                     }
                                     Text {
                                         anchors.centerIn: parent
@@ -829,7 +829,6 @@ Panel {
                                     color: Color.foreground
                                     maximumLineCount: 1
                                 }
-                                Text {
                                 Text {
                                     textFormat: Text.PlainText
                                     text: (model.year ? model.year : "\u2013") + "  \u2605 " + model.rating
@@ -928,6 +927,7 @@ Panel {
                                 color: "#66000000"
                                 Text {
                                     anchors.centerIn: parent
+                                    textFormat: Text.PlainText
                                     text: "\u2605 " + model.rating
                                     font.family: Style.font.family; font.pixelSize: 10; color: "white"; font.bold: true
                                 }
@@ -951,7 +951,6 @@ Panel {
                             color: Color.foreground
                             maximumLineCount: 1
                         }
-                        Text {
                         Text {
                             textFormat: Text.PlainText
                             text: (model.year ? model.year : "\u2013") + "  \u2605 " + model.rating

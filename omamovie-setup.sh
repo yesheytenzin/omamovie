@@ -41,7 +41,7 @@ if [[ "${OMAMOVIE_BUILD_FROM_SOURCE:-0}" == "1" ]]; then
     export SOURCE_DATE_EPOCH=$(git -C "$DIR" log -1 --format=%ct 2>/dev/null || date +%s)
     export CARGO_INCREMENTAL=0
     export RUSTFLAGS="${RUSTFLAGS:-} -Cstrip=debuginfo"
-    cargo build --frozen --locked --release --manifest-path bridge/Cargo.toml --target "$CARGO_TARGET"
+    cargo build --locked --release --manifest-path bridge/Cargo.toml --target "$CARGO_TARGET"
     BIN_SRC="bridge/target/${CARGO_TARGET}/release/$BIN"
     [[ -x "$BIN_SRC" ]] || fail "cargo build produced no binary at $BIN_SRC"
     # Verify built binary responds to ping before installing

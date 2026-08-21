@@ -8,26 +8,13 @@ Quickshell panel for movies, shows & anime — search, pick season/episode and s
 - **Instant** — dedicated streams process, E1 auto-selected, `≥2` chars for suggestions, recent-search chips, `Esc` to close/clear
 - **Verified** — `py_compile` + crypto unit tests on `push/PR` only (no release artifacts)
 
-## Prerequisites
-
-Needs **`python3` + `mpv`** (no `cargo` / `gh`):
-
-```bash
-omarchy pkg add mpv
-omarchy pkg add python   # provides python3.14 (3.10+ required, verified on 3.14)
-# optional — faster HTTP keep-alive (stdlib urllib is fallback):
-# omarchy pkg add python-requests
-```
-
-Stdlib `urllib` by default; `requests` used if present. No SLSA attestation — source is directly audited.
-
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-Creates shim `.runtime/omamovie-bridge` → `bridge/python/__main__.py` and verifies `{"cmd":"ping"}`. Click **** in the bar to browse.
+Creates shim `$XDG_CACHE_HOME/omamovie/omamovie-bridge` → `bridge/python/__main__.py` and verifies `{"cmd":"ping"}`. Click **** in the bar to browse.
 
 ## Update / Remove
 
@@ -53,7 +40,7 @@ Legacy Rust (`bridge/Cargo.toml`, `bridge/src/`) remains for reference, not buil
 
 - `Esc` closes from any view; clears search field when focused
 - Episodes auto-populate on `openDetails`; `E1` selected, dedicated `streamsProc` for instant load
-- Suggestions gated at `≥2` chars (380ms debounce)
+- Suggestions gated at `≥2` chars (220ms debounce, history instant)
 - Recent searches `Flow` (max 10, deduped, click to re-search)
 - Streams placeholder: `Loading streams for S1E1 …` / `No streams — tap again to retry` (retry `MouseArea`)
 - Sub→dub fallback: `auto-switched to <lang> — N streams` when primary has no streams

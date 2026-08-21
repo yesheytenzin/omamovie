@@ -26,9 +26,9 @@ Add and enable the plugin:
 omarchy plugin add https://github.com/yesheytenzin/omamovie.git --enable
 ```
 
-That single command clones the plugin, enables its bar widget, and installs the bridge **built reproducibly from locked source by default** (`bridge/rust-toolchain.toml` 1.90.0`, `cargo --locked`, `SOURCE_DATE_EPOCH`, `Cargo.lock` pinned `moviebox-tui@90acb82c`). If `cargo` is present it builds locally; otherwise it downloads the attested release tarball `OmaMovie_Linux_$ARCH.tar.gz` and verifies `SHA256SUMS` **and** SLSA provenance (`actions/attest-build-provenance`, `gh attestation verify`) fail-closed before extracting to `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/`. No bundled ELF is executed without independent verification. The Omarchy shell restarts automatically; if you click during the brief first-run build/download, the panel opens once ready.
+That single command clones the plugin, enables its bar widget, and installs the bridge **fast by default** — it downloads the attested release tarball `OmaMovie_Linux_$ARCH.tar.gz` and verifies `SHA256SUMS` **and** SLSA provenance (`actions/attest-build-provenance` pinned, `gh attestation verify`) **fail-closed** before extracting to `~/.config/omarchy/plugins/tenzin.omamovie/.runtime/` (`<5s`). If the release is unavailable or verification fails, it falls back to a reproducible local build from locked source (`bridge/rust-toolchain.toml` `1.90.0`, `cargo --locked`, `SOURCE_DATE_EPOCH`, `Cargo.lock` pinned `moviebox-tui@90acb82c`). No bundled ELF is executed without independent verification. The Omarchy shell restarts automatically; if you click during the brief download/build, the panel opens once ready.
 
-Bundled `prebuilt/` ELFs from older releases are no longer shipped or trusted by default — they are ignored unless you explicitly `OMAMOVIE_ALLOW_PREBUILT=1` (then still verified against a SLSA bundle, fail-closed). To force a release download even when `cargo` exists: `OMAMOVIE_PREFER_RELEASE=1`.
+For auditors or offline: `OMAMOVIE_BUILD_FROM_SOURCE=1` forces a local reproducible build instead of the fast verified download. Legacy `OMAMOVIE_PREFER_SOURCE=1` also prioritizes source. Bundled `prebuilt/` ELFs from older releases are ignored unless you explicitly `OMAMOVIE_ALLOW_PREBUILT=1` (then still verified against its SLSA bundle, fail-closed).
 
 Click the **movie** icon in the bar (󰨂): search, pick a title, choose a
 stream (resolution / codec / size), Play. Series get a season + episode
@@ -41,7 +41,7 @@ omarchy plugin update tenzin.omamovie
 ```
 
 The Omarchy shell restarts automatically after each actual update. If
-`manifest.json` has a new version, the bridge is rebuilt from source or the new attested release tarball is downloaded and verified fail-closed.
+`manifest.json` has a new version, the new attested release tarball is downloaded fast and verified fail-closed (fallback: rebuilt from source).
 
 ## Remove
 
@@ -87,22 +87,22 @@ omamovie/
   manifest.json          # bar-widget metadata (id tenzin.omamovie)
   BarWidget.qml          # bar icon -> panel
   Panel.qml              # the OmaMovie UI (search/grid/details/play)
-  omamovie-setup.sh      # default builds from locked source; fallback downloads attested release (fail-closed)
+  omamovie-setup.sh      # default fast attested download; fallback builds from locked source (both fail-closed)
   bridge/
     Cargo.toml           # pins moviebox-tui (rev 90acb82c)
     Cargo.lock           # fully locked deps
-    rust-toolchain.toml` 1.90.0 for reproducible local/CI builds
+    rust-toolchain.toml  # 1.90.0 for reproducible local/CI builds
     src/main.rs          # JSON bridge over the upstream engine
   .github/workflows/release.yml # pinned action SHAs, SLSA attest of raw binary + tarball
   README.md  LICENSE
 ```
 
-Bridge binaries are built reproducibly in CI (`bridge/rust-toolchain.toml` 1.90.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --locked`, `RUSTFLAGS=-Cstrip=debuginfo`, `tar --sort-name --mtime --owner=0`) for `x86_64`+`aarch64` on each `v*` tag, and published as `OmaMovie_Linux_*.tar.gz` + `SHA256SUMS` with SLSA provenance (`actions/attest-build-provenance` pinned to commit SHAs, `id-token`/`attestations: write` least-privilege). The default install builds from source; the fallback verifies `SHA256SUMS` and the tarball’s SLSA attestation (`gh attestation verify`) fail-closed before extracting — the exact installed binary is thus bound to the reviewed source revision. No bundled `prebuilt/` ELF is trusted by default.
+Bridge binaries are built reproducibly in CI (`bridge/rust-toolchain.toml` `1.90.0`, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, `cargo --locked`, `RUSTFLAGS=-Cstrip=debuginfo`, `tar --sort=name --mtime --owner=0`) for `x86_64`+`aarch64` on each `v*` tag, and published as `OmaMovie_Linux_*.tar.gz` + `SHA256SUMS` with SLSA provenance (`actions/attest-build-provenance` pinned to `e8998f9`, `id-token`/`attestations: write` least-privilege). The default install **downloads the attested tarball fast and verifies it fail-closed** before extracting — the exact installed binary is thus bound to the reviewed source revision; if unavailable, it falls back to a reproducible local `cargo --locked` build. No bundled `prebuilt/` ELF is trusted by default.
 
 ### Reproducible verification
 
 ```bash
-cat bridge/rust-toolchain.toml` 1.90.0
+cat bridge/rust-toolchain.toml  # 1.90.0
 cargo build --locked --release --manifest-path bridge/Cargo.toml --target x86_64-unknown-linux-gnu
 sha256sum bridge/target/x86_64-unknown-linux-gnu/release/omamovie-bridge  # compare to attested binary
 # Verify a release artifact’s provenance (requires gh CLI)

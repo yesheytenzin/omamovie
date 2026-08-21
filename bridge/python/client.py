@@ -31,22 +31,85 @@ class MovieBoxClient:
         self.active_base_idx = 0
         self.user_agent, self.client_info = generate_client_info_and_ua()
         self.spoofed_ip = random_spoofed_ip()
+        # try to load persisted token/host to avoid init roundtrip on cold start
+        self._load_persisted_state()
         # Use requests if available, else urllib
         self._use_requests = False
         try:
             import requests  # type: ignore
+            from requests.adapters import HTTPAdapter
             self._requests = requests
             self._session = requests.Session()
-            # timeout settings similar to Rust: connect 3s, read 12s
+            # keep-alive pool tuned for 7 hosts
+            adapter = HTTPAdapter(pool_connections=7, pool_maxsize=7, max_retries=0)
+            self._session.mount("https://", adapter)
+            self._session.mount("http://", adapter)
+            self._session.headers.update({"Connection": "keep-alive", "Accept-Encoding": "gzip"})
             self._use_requests = True
         except ImportError:
             self._requests = None
             self._session = None
 
+    def _token_path(self):
+        try:
+            from pathlib import Path
+            import os
+            base = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "moviebox-tui" / "moviebox"
+            base.mkdir(parents=True, exist_ok=True)
+            return base / ".token.json"
+        except:
+            return None
+
+    def _host_path(self):
+        try:
+            from pathlib import Path
+            import os
+            base = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "moviebox-tui" / "moviebox"
+            return base / ".host_idx"
+        except:
+            return None
+
+    def _load_persisted_state(self):
+        # token: {"token": "...", "ts": 123} 12h expiry
+        try:
+            p = self._token_path()
+            if p and p.exists():
+                import json, time
+                data = json.loads(p.read_text())
+                tok = data.get("token")
+                ts = data.get("ts", 0)
+                if tok and isinstance(tok, str) and (time.time() - ts) < 12*3600:
+                    self.runtime_token = tok
+        except:
+            pass
+        try:
+            p = self._host_path()
+            if p and p.exists():
+                idx = int(p.read_text().strip())
+                if 0 <= idx < len(HOST_POOL):
+                    self.active_base_idx = idx
+        except:
+            pass
+
+    def _save_token(self):
+        try:
+            p = self._token_path()
+            if p:
+                import json, time
+                p.write_text(json.dumps({"token": self.runtime_token, "ts": int(time.time())}))
+        except:
+            pass
+
+    def _save_host(self):
+        try:
+            p = self._host_path()
+            if p:
+                p.write_text(str(self.active_base_idx))
+        except:
+            pass
+
     def _absorb_x_user(self, headers):
-        # headers is dict-like case-insensitive
         x_user = None
-        # Try case-insensitive
         for k, v in headers.items():
             if k.lower() == "x-user":
                 x_user = v
@@ -60,6 +123,7 @@ class MovieBoxClient:
             token = data.get("token") if isinstance(data, dict) else None
             if isinstance(token, str) and token:
                 self.runtime_token = token
+                self._save_token()
         except:
             pass
 
@@ -67,9 +131,9 @@ class MovieBoxClient:
         if self._use_requests:
             try:
                 if method.upper() == "POST":
-                    resp = self._session.request(method, url, headers=headers, data=body.encode() if body else None, timeout=(3, 12))
+                    resp = self._session.request(method, url, headers=headers, data=body.encode() if body else None, timeout=(2, 8))
                 else:
-                    resp = self._session.request(method, url, headers=headers, timeout=(3, 12))
+                    resp = self._session.request(method, url, headers=headers, timeout=(2, 8))
                 status = resp.status_code
                 resp_headers = dict(resp.headers)
                 self._absorb_x_user(resp_headers)
@@ -104,8 +168,7 @@ class MovieBoxClient:
                 req = urllib.request.Request(url, method=method.upper(), headers=headers)
                 if body is not None:
                     req.data = body.encode()
-                # Add timeout via urlopen
-                with urllib.request.urlopen(req, timeout=12) as resp:
+                with urllib.request.urlopen(req, timeout=8) as resp:
                     status = resp.getcode()
                     resp_headers = dict(resp.getheaders())
                     self._absorb_x_user(resp_headers)
@@ -165,8 +228,8 @@ class MovieBoxClient:
             headers = build_signed_headers(method, url, body, self.runtime_token, self.user_agent, self.client_info, self.spoofed_ip)
             data, status, retry_after, err = self._http_request(method, url, headers, body)
             if err is None and data is not None:
-                # success
                 self.active_base_idx = idx
+                self._save_host()
                 return data
             if retry_after is not None:
                 backoff_ms = retry_after
@@ -199,6 +262,31 @@ class MovieBoxClient:
             raise
 
     def init(self):
+        # fast path: token already in memory and file fresh
+        if self.runtime_token is not None:
+            try:
+                p = self._token_path()
+                if p and p.exists():
+                    import json, time as _t
+                    d = json.loads(p.read_text())
+                    if _t.time() - d.get("ts", 0) < 12 * 3600:
+                        return {"cached": True}
+            except:
+                pass
+        # try load from file without network
+        if self.runtime_token is None:
+            try:
+                p = self._token_path()
+                if p and p.exists():
+                    import json, time as _t2
+                    d = json.loads(p.read_text())
+                    tok = d.get("token")
+                    ts = d.get("ts", 0)
+                    if tok and isinstance(tok, str) and (_t2.time() - ts) < 12 * 3600:
+                        self.runtime_token = tok
+                        return {"cached": True}
+            except:
+                pass
         path = "/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version="
         data = self._request_hosts("GET", path, None)
         if self.runtime_token is None:
@@ -273,13 +361,13 @@ class MovieBoxClient:
         # Use requests or urllib to fetch
         try:
             if self._use_requests:
-                resp = self._session.get(url, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=15)
+                resp = self._session.get(url, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8)
                 if resp.status_code >= 200 and resp.status_code < 300:
                     return resp.content
                 return None
             else:
                 req = urllib.request.Request(url, headers={"User-Agent": "MovieBox-Tui/1.0"})
-                with urllib.request.urlopen(req, timeout=15) as r:
+                with urllib.request.urlopen(req, timeout=8) as r:
                     if 200 <= r.getcode() < 300:
                         return r.read()
                     return None

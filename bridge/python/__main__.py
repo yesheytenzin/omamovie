@@ -336,36 +336,88 @@ def run(cmd: str, req: dict):
                 pass
         filtered = filter_and_sort_search_items(items, q)
         if len(filtered) < 5 and page == 1:
-            for next_page in range(2, 4):
-                if len(filtered) >= 5:
-                    break
-                try:
-                    raw2 = client.search(q, next_page)
-                except:
-                    break
-                items2_raw = unwrap_subjects(raw2)
-                items2 = [normalize_search_item(x) for x in items2_raw if isinstance(x, dict)]
-                if not items2:
-                    break
-                try:
-                    set_provider_search_cache("moviebox", cq, next_page, raw2)
-                except:
-                    pass
-                more = filter_and_sort_search_items(items2, q)
-                more = [v for v in more if isinstance(v.get("title"), str) and q.lower() in v["title"].lower()]
-                filtered.extend(more)
-                seen = set()
-                dedup = []
-                for v in filtered:
-                    idv = v.get("id")
-                    if isinstance(idv, str):
-                        if idv in seen:
+            # concurrent fetch for pages 2-3 to cut latency (fresh token/host already persisted)
+            try:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                def _fetch(p):
+                    try:
+                        cc = MovieBoxClient()
+                        try:
+                            main = get_client()
+                            cc.runtime_token = main.runtime_token
+                            cc.active_base_idx = main.active_base_idx
+                            cc.user_agent = main.user_agent
+                            cc.client_info = main.client_info
+                            cc.spoofed_ip = main.spoofed_ip
+                        except:
+                            pass
+                        r = cc.search(q, p)
+                        return p, r
+                    except Exception:
+                        return p, None
+                with ThreadPoolExecutor(max_workers=2) as ex:
+                    futs = {ex.submit(_fetch, pg): pg for pg in (2, 3)}
+                    for fut in as_completed(futs):
+                        p, raw2 = fut.result()
+                        if raw2 is None:
                             continue
-                        seen.add(idv)
-                    dedup.append(v)
-                filtered = dedup
-                if more:
-                    break
+                        items2_raw = unwrap_subjects(raw2)
+                        items2 = [normalize_search_item(x) for x in items2_raw if isinstance(x, dict)]
+                        if not items2:
+                            continue
+                        try:
+                            set_provider_search_cache("moviebox", cq, p, raw2)
+                        except:
+                            pass
+                        more = filter_and_sort_search_items(items2, q)
+                        more = [v for v in more if isinstance(v.get("title"), str) and q.lower() in v["title"].lower()]
+                        if more:
+                            filtered.extend(more)
+                            # dedup
+                            seen = set()
+                            dedup = []
+                            for v in filtered:
+                                idv = v.get("id")
+                                if isinstance(idv, str):
+                                    if idv in seen:
+                                        continue
+                                    seen.add(idv)
+                                dedup.append(v)
+                            filtered = dedup
+                            break
+                    # if still <5 after concurrent, fallback sequential already covered
+            except Exception:
+                # fallback to old sequential on any error
+                for next_page in range(2, 4):
+                    if len(filtered) >= 5:
+                        break
+                    try:
+                        raw2 = client.search(q, next_page)
+                    except:
+                        break
+                    items2_raw = unwrap_subjects(raw2)
+                    items2 = [normalize_search_item(x) for x in items2_raw if isinstance(x, dict)]
+                    if not items2:
+                        break
+                    try:
+                        set_provider_search_cache("moviebox", cq, next_page, raw2)
+                    except:
+                        pass
+                    more = filter_and_sort_search_items(items2, q)
+                    more = [v for v in more if isinstance(v.get("title"), str) and q.lower() in v["title"].lower()]
+                    filtered.extend(more)
+                    seen = set()
+                    dedup = []
+                    for v in filtered:
+                        idv = v.get("id")
+                        if isinstance(idv, str):
+                            if idv in seen:
+                                continue
+                            seen.add(idv)
+                        dedup.append(v)
+                    filtered = dedup
+                    if more:
+                        break
             if not filtered:
                 fallback = [normalize_search_item(x) for x in items_raw if isinstance(x, dict)]
                 seen = set()

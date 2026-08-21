@@ -54,7 +54,7 @@ jobs:
           strip "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"
           sha256sum "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}" | awk '{print $1 "  ${{ matrix.binary }}"}' > "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256"
           cat "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}.sha256"
-          tar --sort-name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" "${{ matrix.binary }}"
+          tar --sort=name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner -C "bridge/target/${{ matrix.target }}/release" -czf "${{ matrix.asset }}" "${{ matrix.binary }}"
           sha256sum "${{ matrix.asset }}" | tee -a sha256.txt
           # Keep both tarball hash and raw binary hash for attestation
           ls -lh "${{ matrix.asset }}" "bridge/target/${{ matrix.target }}/release/${{ matrix.binary }}"

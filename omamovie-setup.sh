@@ -14,6 +14,11 @@ say()  { printf '\033[1;36m[omamovie]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[omamovie]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[omamovie]\033[0m %s\n' "$*"; exit 1; }
 
+# Hardening: log custom release base if overridden (env poisoning otherwise allows attacker-controlled binary + checksum)
+if [[ -n "${OMAMOVIE_RELEASE_BASE:-}" ]]; then
+  say "using custom release base: $RELEASE_BASE"
+fi
+
 command -v mpv >/dev/null 2>&1 || command -v vlc >/dev/null 2>&1 ||
   warn "no media player found - install one with: omarchy pkg add mpv"
 
@@ -75,6 +80,10 @@ else
   curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$RELEASE_BASE/SHA256SUMS"
   (cd "$TMP" && sha256sum -c SHA256SUMS --ignore-missing --quiet) ||
     fail "release checksum verification failed"
+  # Mitigate tar traversal (ZipSlip): archive must contain only the expected binary
+  if ! tar -tzf "$TMP/$ARCHIVE" | grep -qxE "(\./)?$BIN"; then
+    fail "release archive has unexpected contents"
+  fi
 
   tar -xzf "$TMP/$ARCHIVE" -C "$TMP"
   [[ -x "$TMP/$BIN" ]] || fail "$BIN was not found in the release archive"

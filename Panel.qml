@@ -1026,6 +1026,7 @@ Panel {
                                     Image {
                                         anchors.fill: parent
                                         source: root.safeUrl(model.coverPath) || root.safeUrl(model.cover)
+                                        sourceSize: Qt.size(256, 384)
                                         fillMode: Image.PreserveAspectCrop
                                         visible: source !== ""
                                         asynchronous: true
@@ -1141,6 +1142,7 @@ Panel {
                             Image {
                                 anchors.fill: parent
                                 source: root.safeUrl(model.coverPath) || root.safeUrl(model.cover)
+                                sourceSize: Qt.size(256, 384)
                                 fillMode: Image.PreserveAspectCrop
                                 visible: source !== ""
                                 asynchronous: true
@@ -1227,6 +1229,7 @@ Panel {
                             anchors.fill: parent
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
+                            sourceSize: Qt.size(400, 640)
                             source: ""
                         }
                         Text {

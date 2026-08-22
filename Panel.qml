@@ -613,7 +613,7 @@ Panel {
         root.statusText = "";
         root.genreGen++;
         var gen = root.genreGen;
-        request("search", { q: genre, page: 1 }, function(resp, code) {
+        request("genre", { genre: genre }, function(resp, code) {
             if (gen !== root.genreGen) return;
             root.busy = false;
             if (!resp || !resp.ok) {

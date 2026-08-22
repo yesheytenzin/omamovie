@@ -26,6 +26,7 @@ try:
         get_provider_details_cache, set_provider_details_cache,
         get_provider_stream_cache, set_provider_stream_cache,
         get_homepage_cache, set_homepage_cache,
+        get_genre_cache, set_genre_cache,
     )
     from models import subject_id as sid_fn, stype as stype_fn, extract_cover_url, extract_browse_metrics, captions_json_to_options, clean_title_simple, is_trailer_title
     from titles import clean_moviebox_title
@@ -39,6 +40,7 @@ except ImportError as e:
             get_provider_details_cache, set_provider_details_cache,
             get_provider_stream_cache, set_provider_stream_cache,
             get_homepage_cache, set_homepage_cache,
+            get_genre_cache, set_genre_cache,
         )
         from bridge.python.models import subject_id as sid_fn, stype as stype_fn, extract_cover_url, extract_browse_metrics, captions_json_to_options, clean_title_simple, is_trailer_title
         from bridge.python.titles import clean_moviebox_title
@@ -231,6 +233,9 @@ def normalize_search_item(item: dict):
     duration = item.get("duration", "")
     if not isinstance(duration, str):
         duration = str(duration) if duration is not None else ""
+    genre = item.get("genre", "")
+    if not isinstance(genre, str):
+        genre = str(genre) if genre is not None else ""
     return {
         "id": sid,
         "title": title,
@@ -240,6 +245,7 @@ def normalize_search_item(item: dict):
         "rating": rating,
         "season": season,
         "duration": duration,
+        "genre": genre,
     }
 
 def run(cmd: str, req: dict):
@@ -316,6 +322,73 @@ def run(cmd: str, req: dict):
             out.append({"name": name, "id": idv, "cover": cover})
         return {"suggestions": out[:8]}
 
+    elif cmd == "genre":
+        genre = str_arg(req, "genre") or str_arg(req, "q")
+        genre = genre.strip()
+        if not genre:
+            return {"items": []}
+        gl = genre.lower()
+        cached = get_genre_cache(genre)
+        if cached is not None:
+            return {"items": cached}
+        try:
+            client.init()
+        except:
+            pass
+        # keyword search page 1 (+2 if needed) — candidate pool includes genre-tagged titles
+        candidates = []
+        seen_pages = set()
+        for page in (1, 2, 3):
+            if page in seen_pages:
+                continue
+            seen_pages.add(page)
+            if len(candidates) >= 60:
+                break
+            try:
+                raw = client.search(genre, page)
+            except:
+                break
+            if not raw:
+                break
+            items_raw = unwrap_subjects(raw)
+            items = [normalize_search_item(x) for x in items_raw if isinstance(x, dict)]
+            if not items:
+                break
+            candidates.extend(items)
+        # keep movies/series only, no trailers
+        valid = filter_and_sort_search_items(candidates, genre)
+        # genre-field match is the real filter (title-keyword match is wrong here)
+        matched = []
+        for v in valid:
+            g = (v.get("genre") or "").lower()
+            if gl in g:
+                matched.append(v)
+        # sort by rating desc, dedupe
+        def gkey(v):
+            try:
+                r = float(v.get("rating")) if v.get("rating") is not None else 0.0
+            except:
+                r = 0.0
+            return -r
+        matched.sort(key=gkey)
+        seen = set()
+        out = []
+        for v in matched:
+            idv = v.get("id")
+            if isinstance(idv, str):
+                if idv in seen:
+                    continue
+                seen.add(idv)
+            out.append(v)
+        # fallback: if genre-field matching is too thin, return valid keyword pool
+        if len(out) < 5:
+            out = valid[:20]
+        try:
+            set_genre_cache(genre, 1, out)
+        except:
+            pass
+        return {"items": out}
+
     elif cmd == "search":
         q = str_arg(req, "q")
         page = usz_arg(req, "page", 1)
@@ -324,6 +397,7 @@ def run(cmd: str, req: dict):
         if not q.strip():
             return {"items": []}
         cq = q.strip().lower()
+        # genre browsing via genre cmd keeps keyword search pure
         cached = get_provider_search_cache("moviebox", cq, page)
         if cached is not None:
             items_raw = unwrap_subjects(cached)

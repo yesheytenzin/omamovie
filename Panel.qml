@@ -259,8 +259,9 @@ Panel {
         });
     }
 
+    // Debounced suggest: coalesce keystrokes, wait 220ms after last edit
     function debounceSuggest() {
-        suggestTimer.restart();
+        suggestTimer.restart(); // reset countdown on each keystroke
     }
 
     function openDetails(idx) {
@@ -737,15 +738,18 @@ Panel {
     ListModel { id: homeModel }
     ListModel { id: historyModel }
 
+    // Suggest debounce (220ms) — guards: view + ≥2 chars, history-first then network
     Timer {
         id: suggestTimer
-        interval: 220
+        interval: 220 // debounce window — lower = snappier, higher = fewer API calls
         repeat: false
         onTriggered: {
+            // only suggest on browsable views; clear stale chips when leaving
             if (root.view !== "home" && root.view !== "grid") { suggestionModel.clear(); return; }
             var q = searchField.text.trim();
+            // require ≥2 chars — avoids noisy 1-char queries
             if (q.length < 2) { suggestionModel.clear(); return; }
-            // instant history prefix matches (no network)
+            // history-first instant matches (no network)
             var ql = q.toLowerCase();
             var hist = [];
             for (var hi = 0; hi < historyModel.count; hi++) {
@@ -761,6 +765,7 @@ Panel {
             var gen = root.suggestGen;
             request("suggest", { q: q }, function(resp) {
                 if (gen !== root.suggestGen) return;
+                // bail if navigated to details during request
                 if (root.view !== "home" && root.view !== "grid") { suggestionModel.clear(); return; }
                 var list = (resp && resp.ok && resp.suggestions) ? resp.suggestions : [];
                 // merge history + network, dedup
@@ -883,7 +888,7 @@ Panel {
                 Layout.fillWidth: true
                 placeholderText: "Search movies, shows, anime \u2026"
                 onAccepted: root.doSearch()
-                onTextChanged: root.debounceSuggest()
+                onTextChanged: root.debounceSuggest() // keystroke → debounced suggest
                 Keys.onEscapePressed: function(event) {
                     if (searchField.text.length > 0) {
                         searchField.clear();

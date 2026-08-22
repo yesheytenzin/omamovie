@@ -210,6 +210,24 @@ Panel {
     }
 
     // ---------------- actions ----------------
+    // Swap remote cover URLs for local cached poster files (fast repeat loads)
+    function cachePosters(model) {
+        if (!model || model.count === 0) return;
+        var seen = {}, uniq = [];
+        for (var i = 0; i < model.count; i++) {
+            var u = model.get(i).cover;
+            if (u && !seen[u]) { seen[u] = 1; uniq.push(u); }
+        }
+        if (uniq.length === 0) return;
+        request("posters", { urls: uniq }, function(resp) {
+            if (!resp || !resp.ok || !resp.paths) return;
+            var paths = resp.paths;
+            for (var k = 0; k < model.count; k++) {
+                var p = paths[model.get(k).cover];
+                if (p) model.set(k, { coverPath: p });
+            }
+        });
+    }
     function doSearch() {
         var q = searchField.text.trim();
         if (!q) return;
@@ -237,6 +255,7 @@ Panel {
             }
             root.view = "grid";
             root.statusText = resultModel.count + " results for \u201C" + q + "\u201D";
+            root.cachePosters(resultModel);
         });
     }
 
@@ -573,6 +592,7 @@ Panel {
             }
             root.view = "home";
             root.statusText = homeModel.count ? "Discover \u2022 " + homeModel.count + " titles" : "Search movies, shows and anime";
+            root.cachePosters(homeModel);
         });
     }
 
@@ -606,6 +626,7 @@ Panel {
             root.view = "grid";
             root.statusText = resultModel.count + " " + genre + " titles";
             root.busy = false;
+            root.cachePosters(resultModel);
             return;
         }
         root.busy = true;
@@ -635,6 +656,7 @@ Panel {
             }
             root.view = "grid";
             root.statusText = resultModel.count + " " + genre + " titles";
+            root.cachePosters(resultModel);
         });
     }
 
@@ -996,7 +1018,7 @@ Panel {
                                     // hover scale removed
                                     Image {
                                         anchors.fill: parent
-                                        source: root.safeUrl(model.cover) || root.safeUrl(model.coverPath)
+                                        source: root.safeUrl(model.coverPath) || root.safeUrl(model.cover)
                                         fillMode: Image.PreserveAspectCrop
                                         visible: source !== ""
                                         asynchronous: true
@@ -1111,7 +1133,7 @@ Panel {
                             Behavior on border.width { NumberAnimation { duration: 100 } }
                             Image {
                                 anchors.fill: parent
-                                source: root.safeUrl(model.cover) || root.safeUrl(model.coverPath)
+                                source: root.safeUrl(model.coverPath) || root.safeUrl(model.cover)
                                 fillMode: Image.PreserveAspectCrop
                                 visible: source !== ""
                                 asynchronous: true

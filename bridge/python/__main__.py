@@ -634,6 +634,51 @@ def run(cmd: str, req: dict):
             raise RuntimeError(str(e))
         return {"path": str(path)}
 
+    elif cmd == "posters":
+        urls = req.get("urls")
+        if not isinstance(urls, list) or not urls:
+            return {"paths": {}}
+        # dedupe, http(s) only
+        seen = set()
+        uniq = []
+        for u in urls:
+            if not isinstance(u, str) or u in seen:
+                continue
+            seen.add(u)
+            s = safe_http_url(u)
+            if s:
+                uniq.append(s)
+        out = {}
+        def _one(u):
+            short = hashlib.md5(u.encode()).hexdigest()[:16]
+            pdir = poster_dir()
+            for ext in ("jpg", "png", "webp", "img"):
+                p = pdir / f"{short}.{ext}"
+                if p.exists():
+                    return u, str(p)
+            data = client.fetch_poster_bytes(u)
+            if not data:
+                return u, ""
+            p = pdir / f"{short}.{detect_ext(data)}"
+            try:
+                p.write_bytes(data)
+                return u, str(p)
+            except:
+                return u, ""
+        # parallel downloads, single python process
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for u, p in ex.map(_one, uniq):
+                    if p:
+                        out[u] = p
+        except Exception:
+            for u in uniq:
+                _, p = _one(u)
+                if p:
+                    out[u] = p
+        return {"paths": out}
+
     elif cmd in ("homepage", "discover", "home"):
         tab = str_arg(req, "tab")
         tab_id = tab if tab else "2"

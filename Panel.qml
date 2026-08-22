@@ -1263,7 +1263,7 @@ Panel {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        contentHeight: detailsContent.height
+                        contentHeight: Math.max(detailsContent.implicitHeight, height)
                         boundsBehavior: Flickable.StopAtBounds
                         maximumFlickVelocity: 3500
                         ScrollIndicator.vertical: ScrollIndicator { }
@@ -1271,6 +1271,7 @@ Panel {
                         ColumnLayout {
                             id: detailsContent
                             width: detailsScroll.width
+                            height: implicitHeight
                             spacing: 8
 
                         RowLayout {

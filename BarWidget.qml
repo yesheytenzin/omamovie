@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -38,6 +39,7 @@ BarWidget {
     }
 
     function togglePanel() {
+        console.log("[DBG] togglePanel clicked, bridgeReady=", bridgeReady, "item=", !!panelLoader.item)
         if (!root.bridgeReady) {
             // The bridge is still downloading (or missing): note that the
             // user wants the panel, and re-open it once installation lands.

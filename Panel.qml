@@ -1019,6 +1019,7 @@ Panel {
                                     Image {
                                         anchors.fill: parent
                                         source: root.safeUrl(model.coverPath) || root.safeUrl(model.cover)
+                                        sourceSize: Qt.size(256, 384)
                                         fillMode: Image.PreserveAspectCrop
                                         visible: source !== ""
                                         asynchronous: true
@@ -1134,6 +1135,7 @@ Panel {
                             Image {
                                 anchors.fill: parent
                                 source: root.safeUrl(model.coverPath) || root.safeUrl(model.cover)
+                                        sourceSize: Qt.size(256, 384)
                                 fillMode: Image.PreserveAspectCrop
                                 visible: source !== ""
                                 asynchronous: true
@@ -1220,6 +1222,7 @@ Panel {
                             anchors.fill: parent
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
+                            sourceSize: Qt.size(400, 640)
                             source: ""
                         }
                         Text {
@@ -1348,42 +1351,43 @@ Panel {
                         }
 
                         // episodes — virtualized grid (handles 200-400+ episodes, internal scroll)
-                        GridView {
-                            id: episodesGrid
+                        Item {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(30, root.maxEp) > 0
-                                ? Math.min(4, Math.ceil(root.maxEp / Math.max(1, Math.floor(width / (52 * panel.uiScale)))) * (32 * panel.uiScale) + 6)
-                                : 0
+                            Layout.preferredHeight: root.isSeries && root.maxEp > 0 ? Math.round(140 * panel.uiScale) : 0
                             visible: root.isSeries && root.maxEp > 0
                             clip: true
-                            cellWidth: Math.round(52 * panel.uiScale)
-                            cellHeight: Math.round(32 * panel.uiScale)
-                            flow: GridView.FlowLeftToRight
-                            interactive: true
-                            boundsBehavior: Flickable.StopAtBounds
-                            maximumFlickVelocity: 3500
-                            reuseItems: true
-                            cacheBuffer: 400
-                            model: root.maxEp
-                            delegate: Button {
-                                width: episodesGrid.cellWidth - 6
-                                height: episodesGrid.cellHeight - 6
-                                text: "E" + (index + 1)
-                                fontSize: Style.font.caption
-                                horizontalPadding: 4
-                                selected: (index + 1) === root.curEp
-                                onClicked: {
-                                    root.curEp = index + 1;
-                                    root.loadStreams(root.curSeason, index + 1);
-                                    episodesGrid.positionViewAtIndex(index, GridView.Center);
+                            GridView {
+                                id: episodesGrid
+                                anchors.fill: parent
+                                cellWidth: Math.round(52 * panel.uiScale)
+                                cellHeight: Math.round(32 * panel.uiScale)
+                                flow: GridView.FlowLeftToRight
+                                interactive: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                maximumFlickVelocity: 3500
+                                reuseItems: true
+                                cacheBuffer: 400
+                                model: root.maxEp
+                                delegate: Button {
+                                    width: episodesGrid.cellWidth - 6
+                                    height: episodesGrid.cellHeight - 6
+                                    text: "E" + (index + 1)
+                                    fontSize: Style.font.caption
+                                    horizontalPadding: 4
+                                    selected: (index + 1) === root.curEp
+                                    onClicked: {
+                                        root.curEp = index + 1;
+                                        root.loadStreams(root.curSeason, index + 1);
+                                        episodesGrid.positionViewAtIndex(index, GridView.Center);
+                                    }
                                 }
-                            }
-                            onModelChanged: {
-                                var ep = root.curEp;
-                                Qt.callLater(function() {
-                                    if (ep > 0 && ep <= episodesGrid.count)
-                                        episodesGrid.positionViewAtIndex(ep - 1, GridView.Center);
-                                });
+                                onModelChanged: {
+                                    var ep = root.curEp;
+                                    Qt.callLater(function() {
+                                        if (ep > 0 && ep <= episodesGrid.count)
+                                            episodesGrid.positionViewAtIndex(ep - 1, GridView.Center);
+                                    });
+                                }
                             }
                         }
 

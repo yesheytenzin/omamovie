@@ -1208,7 +1208,7 @@ Panel {
                     anchors.fill: parent
                     spacing: 14
 
-                    // poster
+                    // poster (click to play — auto-select first stream)
                     Rectangle {
                         Layout.preferredWidth: Math.round(170 * panel.uiScale)
                         Layout.fillHeight: true
@@ -1230,14 +1230,48 @@ Panel {
                             font.pixelSize: 40
                             color: Qt.darker(Color.foreground, 1.3)
                         }
+                        // play overlay
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 54; height: 54; radius: 27
+                            color: "#AA000000"
+                            border.width: 2
+                            border.color: "white"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\u25B6"
+                                font.family: Style.font.family
+                                font.pixelSize: 24
+                                color: "white"
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: root.details !== null || root.streams.length > 0
+                            onClicked: {
+                                if (root.selStream < 0 && root.streams.length > 0) root.selStream = 0;
+                                if (root.selStream >= 0) { root.playExternal(); root.close(); }
+                                else root.statusText = "No streams yet — pick an episode or wait";
+                            }
+                        }
                     }
 
-                    // info column
-                    ColumnLayout {
-                        id: detailsContent
+                    // info column — scrollable so any episode count stays reachable
+                    Flickable {
+                        id: detailsScroll
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        spacing: 8
+                        clip: true
+                        contentHeight: detailsContent.height
+                        boundsBehavior: Flickable.StopAtBounds
+                        maximumFlickVelocity: 3500
+                        ScrollIndicator.vertical: ScrollIndicator { }
+
+                        ColumnLayout {
+                            id: detailsContent
+                            width: detailsScroll.width
+                            spacing: 8
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1312,22 +1346,43 @@ Panel {
                             }
                         }
 
-                        // episodes
-                        Flow {
+                        // episodes — virtualized grid (handles 200-400+ episodes, internal scroll)
+                        GridView {
+                            id: episodesGrid
                             Layout.fillWidth: true
-                            visible: root.isSeries
-                            spacing: 6
-                            Repeater {
-                                model: root.maxEp
-                                Button {
-                                    text: "E" + (index + 1)
-                                    fontSize: Style.font.caption
-                                    selected: (index + 1) === root.curEp
-                                    onClicked: {
-                                        root.curEp = index + 1;
-                                        root.loadStreams(root.curSeason, index + 1);
-                                    }
+                            Layout.preferredHeight: Math.min(30, root.maxEp) > 0
+                                ? Math.min(4, Math.ceil(root.maxEp / Math.max(1, Math.floor(width / (52 * panel.uiScale)))) * (32 * panel.uiScale) + 6)
+                                : 0
+                            visible: root.isSeries && root.maxEp > 0
+                            clip: true
+                            cellWidth: Math.round(52 * panel.uiScale)
+                            cellHeight: Math.round(32 * panel.uiScale)
+                            flow: GridView.FlowLeftToRight
+                            interactive: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            maximumFlickVelocity: 3500
+                            reuseItems: true
+                            cacheBuffer: 400
+                            model: root.maxEp
+                            delegate: Button {
+                                width: episodesGrid.cellWidth - 6
+                                height: episodesGrid.cellHeight - 6
+                                text: "E" + (index + 1)
+                                fontSize: Style.font.caption
+                                horizontalPadding: 4
+                                selected: (index + 1) === root.curEp
+                                onClicked: {
+                                    root.curEp = index + 1;
+                                    root.loadStreams(root.curSeason, index + 1);
+                                    episodesGrid.positionViewAtIndex(index, GridView.Center);
                                 }
+                            }
+                            onModelChanged: {
+                                var ep = root.curEp;
+                                Qt.callLater(function() {
+                                    if (ep > 0 && ep <= episodesGrid.count)
+                                        episodesGrid.positionViewAtIndex(ep - 1, GridView.Center);
+                                });
                             }
                         }
 
@@ -1345,7 +1400,7 @@ Panel {
 
                         ListView {
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
+                            Layout.preferredHeight: Math.min(root.streams.length * 32, 260)
                             clip: true
                             spacing: 4
                             cacheBuffer: 200
@@ -1374,7 +1429,7 @@ Panel {
                         // streams placeholder — visible when empty (loading vs no streams)
                         Item {
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
+                            Layout.preferredHeight: 90
                             visible: root.streams.length === 0
                             Text {
                                 anchors.centerIn: parent
@@ -1420,6 +1475,8 @@ Panel {
                             }
                         }
                         Item { Layout.preferredHeight: 4 }
+                        }
+                    }
                     }
                 }
             }

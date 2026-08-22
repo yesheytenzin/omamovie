@@ -202,6 +202,15 @@ def set_provider_search_cache(provider: str, query: str, page: int, data):
     path = get_provider_search_path(provider, query, page)
     _write_json_cache(path, data)
 
+# Genre browse results are pre-normalized item lists (no raw payload guard)
+def get_genre_cache(name: str, page: int = 1):
+    path = get_provider_search_path("moviebox", f"genre:{name.lower()}", page)
+    return _read_json_cache(path, CACHE_EXPIRY_SECS)
+
+def set_genre_cache(name: str, page: int, data):
+    path = get_provider_search_path("moviebox", f"genre:{name.lower()}", page)
+    _write_json_cache(path, data)
+
 def get_homepage_path(tab_id: str, page: int) -> Path:
     base = get_provider_cache_dir("moviebox", "homepage")
     return base / f"{tab_id}_{page}.json"

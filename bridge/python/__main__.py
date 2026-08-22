@@ -335,14 +335,10 @@ def run(cmd: str, req: dict):
             client.init()
         except:
             pass
-        # keyword search page 1 (+2 if needed) — candidate pool includes genre-tagged titles
+        # candidate pool: keyword search, multiple pages (perPage>20 rejected by API)
         candidates = []
-        seen_pages = set()
-        for page in (1, 2, 3):
-            if page in seen_pages:
-                continue
-            seen_pages.add(page)
-            if len(candidates) >= 60:
+        for page in (1, 2, 3, 4, 5):
+            if len(candidates) >= 120:
                 break
             try:
                 raw = client.search(genre, page)
@@ -363,13 +359,16 @@ def run(cmd: str, req: dict):
             g = (v.get("genre") or "").lower()
             if gl in g:
                 matched.append(v)
-        # sort by rating desc, dedupe
+        # rank: non-title matches first (genre browsing), then title-keyword matches,
+        # rating desc within each group
         def gkey(v):
             try:
                 r = float(v.get("rating")) if v.get("rating") is not None else 0.0
             except:
                 r = 0.0
-            return -r
+            title = (v.get("title") or "").lower()
+            in_title = 1 if gl in title else 0
+            return (in_title, -r)
         matched.sort(key=gkey)
         seen = set()
         out = []

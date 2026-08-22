@@ -22,6 +22,52 @@ HOST_POOL = [
 
 RETRY_STATUS_CODES = {403, 406, 407, 429, 500, 502, 503, 504}
 
+# byte limits to prevent memory/disk exhaustion from compromised upstream
+MAX_API_BYTES = 5 * 1024 * 1024          # API JSON (search/details/etc.) ~50-300KB normally
+MAX_POSTER_BYTES = 10 * 1024 * 1024       # poster images (pbcdn) ~30-300KB, cap 10MiB
+MAX_SUBTITLE_BYTES = 2 * 1024 * 1024      # subtitles ~5-100KB, cap 2MiB
+
+def _check_content_length(headers, limit: int):
+    if not headers:
+        return
+    raw = headers.get("Content-Length") or headers.get("content-length") or headers.get("CONTENT-LENGTH")
+    if raw is None:
+        return
+    try:
+        n = int(str(raw).strip())
+        if n > limit:
+            raise ScraperError(f"response too large: Content-Length {n} > limit {limit}")
+    except ScraperError:
+        raise
+    except Exception:
+        pass
+
+def _read_limited_requests(resp, limit: int) -> bytes:
+    # stream already, read chunked with limit
+    chunks = []
+    total = 0
+    for chunk in resp.iter_content(chunk_size=8192):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > limit:
+            raise ScraperError(f"response too large: > {limit} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+def _read_limited_urllib(resp, limit: int) -> bytes:
+    # check header first
+    try:
+        _check_content_length(dict(resp.getheaders()), limit)
+    except ScraperError:
+        raise
+    except Exception:
+        pass
+    data = resp.read(limit + 1)
+    if len(data) > limit:
+        raise ScraperError(f"response too large: > {limit} bytes")
+    return data
+
 class ScraperError(Exception):
     pass
 
@@ -108,6 +154,7 @@ class MovieBoxClient:
     def _write_private(self, path, text):
         # Atomic write with 0600 (owner-only) — token must not be world-readable
         import os, tempfile
+        tmp = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tok-", suffix=".tmp")
@@ -118,11 +165,13 @@ class MovieBoxClient:
             os.chmod(tmp, 0o600)
             os.replace(tmp, path)
             os.chmod(path, 0o600)
+            tmp = None  # moved, don't unlink
         finally:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     def _save_host(self):
         try:
@@ -153,16 +202,20 @@ class MovieBoxClient:
 
     def _http_request(self, method: str, url: str, headers: dict, body: str | None):
         if self._use_requests:
+            assert self._session is not None
             try:
                 if method.upper() == "POST":
-                    resp = self._session.request(method, url, headers=headers, data=body.encode() if body else None, timeout=(2, 8))
+                    resp = self._session.request(method, url, headers=headers, data=body.encode() if body else None, timeout=(2, 8), stream=True)
                 else:
-                    resp = self._session.request(method, url, headers=headers, timeout=(2, 8))
+                    resp = self._session.request(method, url, headers=headers, timeout=(2, 8), stream=True)
                 status = resp.status_code
                 resp_headers = dict(resp.headers)
                 self._absorb_x_user(resp_headers)
                 if status in RETRY_STATUS_CODES:
-                    # Handle 429 backoff header
+                    try:
+                        resp.close()
+                    except:
+                        pass
                     retry_after = None
                     if status == 429:
                         ra = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
@@ -172,18 +225,38 @@ class MovieBoxClient:
                         except:
                             retry_after = 400
                     return None, status, retry_after, None  # signal retry
-                # success?
                 if not (200 <= status < 300):
+                    try:
+                        resp.close()
+                    except:
+                        pass
                     return None, status, None, f"API status {status}"
                 try:
-                    text = resp.text
+                    _check_content_length(resp_headers, MAX_API_BYTES)
+                    raw = _read_limited_requests(resp, MAX_API_BYTES)
+                    try:
+                        resp.close()
+                    except:
+                        pass
+                    text = raw.decode('utf-8', errors='ignore')
                     data = json.loads(text) if text else {}
-                    # unwrap data field if present
                     if isinstance(data, dict) and "data" in data:
                         return data["data"], status, None, None
                     return data, status, None, None
+                except ScraperError as se:
+                    try:
+                        resp.close()
+                    except:
+                        pass
+                    return None, status, None, str(se)
                 except json.JSONDecodeError as e:
+                    try:
+                        resp.close()
+                    except:
+                        pass
                     return None, status, None, f"JSON {e}"
+            except ScraperError as se:
+                return None, None, None, str(se)
             except Exception as e:
                 return None, None, None, str(e)
         else:
@@ -198,7 +271,6 @@ class MovieBoxClient:
                     self._absorb_x_user(resp_headers)
                     if status in RETRY_STATUS_CODES:
                         retry_after = 400 if status == 429 else None
-                        # Try to get Retry-After
                         if status == 429:
                             ra = resp_headers.get("Retry-After") or resp_headers.get("retry-after")
                             try:
@@ -209,7 +281,12 @@ class MovieBoxClient:
                         return None, status, retry_after, None
                     if not (200 <= status < 300):
                         return None, status, None, f"API status {status}"
-                    text = resp.read().decode('utf-8', errors='ignore')
+                    try:
+                        _check_content_length(resp_headers, MAX_API_BYTES)
+                        raw = _read_limited_urllib(resp, MAX_API_BYTES)
+                    except ScraperError as se:
+                        return None, status, None, str(se)
+                    text = raw.decode('utf-8', errors='ignore')
                     try:
                         data = json.loads(text) if text else {}
                         if isinstance(data, dict) and "data" in data:
@@ -235,6 +312,8 @@ class MovieBoxClient:
                             retry_after = 400
                     return None, status, retry_after, None
                 return None, status, None, f"API status {status}"
+            except ScraperError as se:
+                return None, None, None, str(se)
             except Exception as e:
                 return None, None, None, str(e)
 
@@ -382,31 +461,54 @@ class MovieBoxClient:
         return self.get(path)
 
     def fetch_poster_bytes(self, url: str):
-        # Use requests or urllib to fetch
         try:
             if self._use_requests:
-                resp = self._session.get(url, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8)
-                if resp.status_code >= 200 and resp.status_code < 300:
-                    return resp.content
-                return None
+                assert self._session is not None
+                resp = self._session.get(url, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8, stream=True)
+                if not (200 <= resp.status_code < 300):
+                    try:
+                        resp.close()
+                    except:
+                        pass
+                    return None
+                try:
+                    _check_content_length(dict(resp.headers), MAX_POSTER_BYTES)
+                    data = _read_limited_requests(resp, MAX_POSTER_BYTES)
+                finally:
+                    try:
+                        resp.close()
+                    except:
+                        pass
+                return data
             else:
                 req = urllib.request.Request(url, headers={"User-Agent": "MovieBox-Tui/1.0"})
                 with urllib.request.urlopen(req, timeout=8) as r:
-                    if 200 <= r.getcode() < 300:
-                        return r.read()
-                    return None
+                    if not (200 <= r.getcode() < 300):
+                        return None
+                    _check_content_length(dict(r.getheaders()), MAX_POSTER_BYTES)
+                    return _read_limited_urllib(r, MAX_POSTER_BYTES)
+        except ScraperError:
+            return None
         except Exception:
             return None
 
     def download_subtitle_file(self, url: str, headers: list[tuple[str,str]]):
-        # limit 8s
+        # limit 8s + byte cap
         try:
             if self._use_requests:
+                assert self._session is not None
                 import requests
                 req_headers = {k: v for k, v in headers} if headers else {}
-                resp = self._session.get(url, headers=req_headers, timeout=8)
+                resp = self._session.get(url, headers=req_headers, timeout=8, stream=True)
                 resp.raise_for_status()
-                content = resp.content
+                _check_content_length(dict(resp.headers), MAX_SUBTITLE_BYTES)
+                try:
+                    content = _read_limited_requests(resp, MAX_SUBTITLE_BYTES)
+                finally:
+                    try:
+                        resp.close()
+                    except:
+                        pass
             else:
                 req = urllib.request.Request(url)
                 for k, v in headers:
@@ -414,7 +516,8 @@ class MovieBoxClient:
                 with urllib.request.urlopen(req, timeout=8) as r:
                     if not (200 <= r.getcode() < 300):
                         raise ScraperError(f"status {r.getcode()}")
-                    content = r.read()
+                    _check_content_length(dict(r.getheaders()), MAX_SUBTITLE_BYTES)
+                    content = _read_limited_urllib(r, MAX_SUBTITLE_BYTES)
             ext = url.rsplit(".", 1)[-1].lower() if "." in url else "srt"
             if ext not in ("srt","vtt","ass","ssa","sub"):
                 ext = "srt"
@@ -428,5 +531,7 @@ class MovieBoxClient:
             path = base / fname
             path.write_bytes(content)
             return path
+        except ScraperError:
+            raise
         except Exception as e:
             raise ScraperError(str(e))

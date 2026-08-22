@@ -74,7 +74,12 @@ class MovieBoxClient:
         try:
             p = self._token_path()
             if p and p.exists():
-                import json, time
+                import json, time, os
+                # one-time repair: tighten mode of pre-existing token from older versions
+                try:
+                    os.chmod(p, 0o600)
+                except OSError:
+                    pass
                 data = json.loads(p.read_text())
                 tok = data.get("token")
                 ts = data.get("ts", 0)
@@ -96,9 +101,28 @@ class MovieBoxClient:
             p = self._token_path()
             if p:
                 import json, time
-                p.write_text(json.dumps({"token": self.runtime_token, "ts": int(time.time())}))
+                self._write_private(p, json.dumps({"token": self.runtime_token, "ts": int(time.time())}))
         except:
             pass
+
+    def _write_private(self, path, text):
+        # Atomic write with 0600 (owner-only) — token must not be world-readable
+        import os, tempfile
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tok-", suffix=".tmp")
+            try:
+                os.write(fd, text.encode("utf-8"))
+            finally:
+                os.close(fd)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
     def _save_host(self):
         try:

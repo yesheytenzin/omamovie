@@ -901,19 +901,19 @@ Panel {
             }
         }
 
-        // suggestions — pill chips
+        // suggestions — pill chips (compact)
         Flow {
             Layout.fillWidth: true
-            spacing: 6
-            Layout.preferredHeight: suggestionModel.count ? Math.min(suggestionModel.count, 2) * 28 + 6 : 0
+            spacing: 4
+            Layout.preferredHeight: suggestionModel.count ? Math.min(Math.ceil(suggestionModel.count / 4), 2) * 22 + 4 : 0
             visible: suggestionModel.count > 0
             Repeater {
                 model: suggestionModel
                 Button {
                     text: model.name
-                    fontSize: Style.font.caption
-                    horizontalPadding: 10
-                    verticalPadding: 4
+                    fontSize: Style.font.caption - 1
+                    horizontalPadding: 8
+                    verticalPadding: 3
                     onClicked: { searchField.text = model.name; root.doSearch(); }
                 }
             }

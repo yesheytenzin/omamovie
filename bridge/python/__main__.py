@@ -335,22 +335,70 @@ def run(cmd: str, req: dict):
             client.init()
         except:
             pass
-        # candidate pool: keyword search, multiple pages (perPage>20 rejected by API)
+        # candidate pool: keyword search pages, CONCURRENT; reuse cached raw pages
         candidates = []
-        for page in (1, 2, 3, 4, 5):
-            if len(candidates) >= 120:
-                break
+        gk = f"genre:{gl}"
+        pages = [1, 2, 3]
+        missing = []
+        for pg in pages:
+            r = get_provider_search_cache("moviebox", gk, pg)
+            if r is not None:
+                items_raw = unwrap_subjects(r)
+                items = [normalize_search_item(x) for x in items_raw if isinstance(x, dict)]
+                if items:
+                    candidates.extend(items)
+            else:
+                missing.append(pg)
+        if len(candidates) < 40:
+            missing.extend([4, 5])
+        if missing:
             try:
-                raw = client.search(genre, page)
-            except:
-                break
-            if not raw:
-                break
-            items_raw = unwrap_subjects(raw)
-            items = [normalize_search_item(x) for x in items_raw if isinstance(x, dict)]
-            if not items:
-                break
-            candidates.extend(items)
+                from concurrent.futures import ThreadPoolExecutor
+                def _gpage(p):
+                    try:
+                        cc = MovieBoxClient()
+                        try:
+                            main = get_client()
+                            cc.runtime_token = main.runtime_token
+                            cc.active_base_idx = main.active_base_idx
+                            cc.user_agent = main.user_agent
+                            cc.client_info = main.client_info
+                            cc.spoofed_ip = main.spoofed_ip
+                        except:
+                            pass
+                        return p, cc.search(genre, p)
+                    except Exception:
+                        return p, None
+                with ThreadPoolExecutor(max_workers=3) as ex:
+                    for p, raw in ex.map(_gpage, missing):
+                        if not raw:
+                            continue
+                        items_raw = unwrap_subjects(raw)
+                        items = [normalize_search_item(x) for x in items_raw if isinstance(x, dict)]
+                        if items:
+                            candidates.extend(items)
+                            try:
+                                set_provider_search_cache("moviebox", gk, p, raw)
+                            except:
+                                pass
+            except Exception:
+                # fallback: serial
+                for pg in missing:
+                    try:
+                        raw = client.search(genre, pg)
+                    except:
+                        continue
+                    if not raw:
+                        continue
+                    items_raw = unwrap_subjects(raw)
+                    items = [normalize_search_item(x) for x in items_raw if isinstance(x, dict)]
+                    if not items:
+                        continue
+                    candidates.extend(items)
+                    try:
+                        set_provider_search_cache("moviebox", gk, pg, raw)
+                    except:
+                        pass
         # keep movies/series only, no trailers
         valid = filter_and_sort_search_items(candidates, genre)
         # genre-field match is the real filter (title-keyword match is wrong here)

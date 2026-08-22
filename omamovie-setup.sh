@@ -43,8 +43,14 @@ mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -w 180 9 || { warn "another install is already running"; exit 0; }
 
-# If already installed and version matches, exit early (no ping check — avoids reinstall loop on offline fresh install)
-if [[ -x "$BRIDGE_DST" && -f "$VERSION_FILE" && "$(cat "$VERSION_FILE")" == "$VERSION" ]]; then
+# Source hash stamp — bridge code fixes propagate even when version unchanged
+SRC_STAMP="$RUNTIME/.src_stamp"
+src_hash() { (cd "$DIR" && find bridge/python -type f -name '*.py' -exec sha256sum {} + | sha256sum | cut -d' ' -f1); }
+CUR_HASH="$(src_hash 2>/dev/null || echo missing)"
+
+# If already installed, version matches AND source unchanged, exit early (no ping check — avoids reinstall loop on offline fresh install)
+if [[ -x "$BRIDGE_DST" && -f "$VERSION_FILE" && "$(cat "$VERSION_FILE")" == "$VERSION" \
+      && -f "$SRC_STAMP" && "$(<"$SRC_STAMP")" == "$CUR_HASH" ]]; then
   say "bridge $VERSION already installed"
   exit 0
 fi
@@ -104,6 +110,8 @@ fi
 mkdir -p "$(dirname "$VERSION_FILE")"
 printf '%s\n' "$VERSION" > "$VERSION_FILE.new"
 mv -f "$VERSION_FILE.new" "$VERSION_FILE"
+printf '%s\n' "$CUR_HASH" > "$SRC_STAMP.new"
+mv -f "$SRC_STAMP.new" "$SRC_STAMP"
 
 say "installed $BRIDGE_DST ($VERSION) — ready"
 record_plugin_revision

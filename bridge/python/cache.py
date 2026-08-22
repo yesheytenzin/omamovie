@@ -208,6 +208,8 @@ def get_genre_cache(name: str, page: int = 1):
     return _read_json_cache(path, CACHE_EXPIRY_SECS)
 
 def set_genre_cache(name: str, page: int, data):
+    if not data:
+        return
     path = get_provider_search_path("moviebox", f"genre:{name.lower()}", page)
     _write_json_cache(path, data)
 

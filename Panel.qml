@@ -1260,22 +1260,12 @@ Panel {
                         }
                     }
 
-                    // info column — scrollable so any episode count stays reachable
-                    Flickable {
-                        id: detailsScroll
+                    // info column
+                    ColumnLayout {
+                        id: detailsContent
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        clip: true
-                        contentHeight: Math.max(detailsContent.implicitHeight, height)
-                        boundsBehavior: Flickable.StopAtBounds
-                        maximumFlickVelocity: 3500
-                        ScrollIndicator.vertical: ScrollIndicator { }
-
-                        ColumnLayout {
-                            id: detailsContent
-                            width: detailsScroll.width
-                            height: implicitHeight
-                            spacing: 8
+                        spacing: 8
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1480,8 +1470,6 @@ Panel {
                             }
                         }
                         Item { Layout.preferredHeight: 4 }
-                        }
-                    }
                     }
                 }
             }
@@ -1674,4 +1662,5 @@ Panel {
         onActivated: root.close()
         context: Qt.WindowShortcut
     }
-}
+}}
+

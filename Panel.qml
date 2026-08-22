@@ -761,6 +761,7 @@ Panel {
             var gen = root.suggestGen;
             request("suggest", { q: q }, function(resp) {
                 if (gen !== root.suggestGen) return;
+                if (root.view !== "home" && root.view !== "grid") { suggestionModel.clear(); return; }
                 var list = (resp && resp.ok && resp.suggestions) ? resp.suggestions : [];
                 // merge history + network, dedup
                 var seen = {};

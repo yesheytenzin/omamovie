@@ -1602,7 +1602,6 @@ Panel {
         }
     }
 
-}
     // True fullscreen - covers entire screen
     PanelWindow {
         id: fullscreenWindow

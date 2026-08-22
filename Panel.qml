@@ -275,6 +275,8 @@ Panel {
         root.selStream = -1;
         root.subs = [];
         detailPoster.source = root.safeUrl(it.cover);
+        suggestionModel.clear();
+        suggestTimer.stop();
         root.view = "details";
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
@@ -342,6 +344,8 @@ Panel {
         root.selStream = -1;
         root.subs = [];
         detailPoster.source = root.safeUrl(it.cover);
+        suggestionModel.clear();
+        suggestTimer.stop();
         root.view = "details";
         root.statusText = "Loading \u201C" + it.title + "\u201D \u2026";
         root.busy = true;
@@ -352,6 +356,7 @@ Panel {
         var resGen = root.resourceGen;
         request("resources", { id: it.id, season: 0, episode: 0, perPage: 20 }, function(resp){
             if (resGen !== root.resourceGen) return;
+            // only use if still movie-like (no seasons yet) and view still details for same id
             if (gen !== root.detailGen) return;
             if (root.currentId !== it.id) return;
             if (resp && resp.ok && resp.items && resp.items.length > 0 && !root.isSeries) {
@@ -737,6 +742,7 @@ Panel {
         interval: 220
         repeat: false
         onTriggered: {
+            if (root.view !== "home" && root.view !== "grid") { suggestionModel.clear(); return; }
             var q = searchField.text.trim();
             if (q.length < 2) { suggestionModel.clear(); return; }
             // instant history prefix matches (no network)
@@ -906,7 +912,7 @@ Panel {
             Layout.fillWidth: true
             spacing: 4
             Layout.preferredHeight: suggestionModel.count ? Math.min(Math.ceil(suggestionModel.count / 4), 2) * 22 + 4 : 0
-            visible: suggestionModel.count > 0
+            visible: suggestionModel.count > 0 && (root.view === "home" || root.view === "grid")
             Repeater {
                 model: suggestionModel
                 Button {

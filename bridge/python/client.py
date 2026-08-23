@@ -42,46 +42,52 @@ def _check_content_length(headers, limit: int):
     except Exception:
         pass
 
+def _resolve_and_validate_host(host: str):
+    """Resolve host and ensure no private/loopback IPs. Returns validated addrinfos.
+    Raises ScraperError if any resolved IP is private."""
+    import ipaddress, socket
+    # literal IP?
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise ScraperError(f"blocked private/loopback host: {host}")
+        # literal public IP — return synthetic single entry (no DNS)
+        return [(socket.AF_INET if ip.version == 4 else socket.AF_INET6, socket.SOCK_STREAM, 0, "", (host, 0))]
+    except ValueError:
+        pass
+    old_to = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(2)
+        infos = socket.getaddrinfo(host, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+    finally:
+        socket.setdefaulttimeout(old_to)
+    if not infos:
+        raise ScraperError(f"DNS resolution failed for {host}")
+    for fam, _, _, _, sockaddr in infos:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                raise ScraperError(f"blocked private/loopback host: {host} -> {ip_str}")
+        except ValueError:
+            continue
+    return infos
+
 def _is_private_url(url: str) -> bool:
     """Return True if URL resolves to loopback/private/link-local (SSRF)."""
     try:
         host = urllib.parse.urlparse(url).hostname
         if not host:
-            return True  # reject URLs without host
-        # block non-http(s) already handled elsewhere, but be safe
+            return True
         scheme = urllib.parse.urlparse(url).scheme.lower()
         if scheme not in ("http", "https"):
             return True
-        # try literal IP first
-        try:
-            import ipaddress
-            ip = ipaddress.ip_address(host)
-            return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
-        except ValueError:
-            pass
-        # DNS lookup with short timeout guard
-        import socket
-        # Use getaddrinfo; limit to 2s via setdefaulttimeout wrapper
-        old_to = socket.getdefaulttimeout()
-        try:
-            socket.setdefaulttimeout(2)
-            infos = socket.getaddrinfo(host, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
-        finally:
-            socket.setdefaulttimeout(old_to)
-        if not infos:
-            return True
-        import ipaddress
-        for fam, _, _, _, sockaddr in infos:
-            ip_str = sockaddr[0]
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
-                    return True
-            except ValueError:
-                continue
+        _resolve_and_validate_host(host)
         return False
+    except ScraperError:
+        return True
     except Exception:
-        return True  # fail closed on parse/DNS error for poster/subtitle
+        return True
 
 def _assert_not_private_url(url: str):
     if _is_private_url(url):
@@ -89,9 +95,7 @@ def _assert_not_private_url(url: str):
 
 class _SSRFRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        # newurl may be relative
         if newurl:
-            # urljoin with original
             try:
                 base = req.full_url
                 joined = urllib.parse.urljoin(base, newurl)
@@ -101,6 +105,21 @@ class _SSRFRedirectHandler(urllib.request.HTTPRedirectHandler):
             except Exception:
                 raise ScraperError(f"blocked redirect to {newurl[:80]}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+def _pinned_getaddrinfo_context(host: str, validated_infos):
+    """Context manager that pins DNS for host to validated_infos during request."""
+    import socket
+    orig = socket.getaddrinfo
+    def _patched(h, p, family=0, type=0, proto=0, flags=0):
+        if h == host:
+            if family != 0:
+                return [i for i in validated_infos if i[0] == family]
+            return validated_infos
+        return orig(h, p, family, type, proto, flags)
+    class _Ctx:
+        def __enter__(self): socket.getaddrinfo = _patched
+        def __exit__(self, *a): socket.getaddrinfo = orig
+    return _Ctx()
 
 def _read_limited_requests(resp, limit: int) -> bytes:
     # stream already, read chunked with limit
@@ -522,13 +541,16 @@ class MovieBoxClient:
 
     def fetch_poster_bytes(self, url: str):
         try:
-            _assert_not_private_url(url)
             if self._use_requests:
                 assert self._session is not None
-                # manual redirect handling with SSRF checks
                 cur = url
                 for _ in range(5):
-                    resp = self._session.get(cur, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8, stream=True, allow_redirects=False)
+                    host = urllib.parse.urlparse(cur).hostname
+                    if not host:
+                        return None
+                    infos = _resolve_and_validate_host(host)
+                    with _pinned_getaddrinfo_context(host, infos):
+                        resp = self._session.get(cur, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8, stream=True, allow_redirects=False)
                     if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
                         loc = resp.headers.get("Location")
                         try:
@@ -536,7 +558,6 @@ class MovieBoxClient:
                         except:
                             pass
                         nxt = urllib.parse.urljoin(cur, loc)
-                        _assert_not_private_url(nxt)
                         cur = nxt
                         continue
                     if not (200 <= resp.status_code < 300):
@@ -556,23 +577,46 @@ class MovieBoxClient:
                     return data
                 return None
             else:
-                # urllib with SSRF-aware redirect handler
-                opener = urllib.request.build_opener(_SSRFRedirectHandler)
-                req = urllib.request.Request(url, headers={"User-Agent": "MovieBox-Tui/1.0"})
-                with opener.open(req, timeout=8) as r:
-                    if not (200 <= r.getcode() < 300):
+                cur = url
+                for _ in range(5):
+                    host = urllib.parse.urlparse(cur).hostname
+                    if not host:
                         return None
-                    _check_content_length(dict(r.getheaders()), MAX_POSTER_BYTES)
-                    return _read_limited_urllib(r, MAX_POSTER_BYTES)
+                    infos = _resolve_and_validate_host(host)
+                    with _pinned_getaddrinfo_context(host, infos):
+                        # no-redirect opener
+                        opener = urllib.request.build_opener(urllib.request.HTTPHandler, urllib.request.HTTPSHandler)
+                        req = urllib.request.Request(cur, headers={"User-Agent": "MovieBox-Tui/1.0"})
+                        try:
+                            r = opener.open(req, timeout=8)
+                        except urllib.error.HTTPError as e:
+                            if 300 <= e.code < 400:
+                                loc = e.headers.get("Location") if e.headers else None
+                                if loc:
+                                    nxt = urllib.parse.urljoin(cur, loc)
+                                    cur = nxt
+                                    continue
+                            return None
+                        with r:
+                            if 300 <= r.getcode() < 400:
+                                loc = r.headers.get("Location") if hasattr(r, 'headers') else None
+                                if loc:
+                                    nxt = urllib.parse.urljoin(cur, loc)
+                                    cur = nxt
+                                    continue
+                            if not (200 <= r.getcode() < 300):
+                                return None
+                            _check_content_length(dict(r.getheaders()), MAX_POSTER_BYTES)
+                            return _read_limited_urllib(r, MAX_POSTER_BYTES)
+                return None
         except ScraperError:
             return None
         except Exception:
             return None
 
     def download_subtitle_file(self, url: str, headers: list[tuple[str,str]]):
-        # limit 8s + byte cap + SSRF check
+        # limit 8s + byte cap + SSRF check with DNS pinning
         try:
-            _assert_not_private_url(url)
             if self._use_requests:
                 assert self._session is not None
                 import requests
@@ -581,7 +625,12 @@ class MovieBoxClient:
                 cur_headers = req_headers
                 content = None
                 for _ in range(5):
-                    resp = self._session.get(cur, headers=cur_headers, timeout=8, stream=True, allow_redirects=False)
+                    host = urllib.parse.urlparse(cur).hostname
+                    if not host:
+                        raise ScraperError(f"blocked URL without host: {cur[:80]}")
+                    infos = _resolve_and_validate_host(host)
+                    with _pinned_getaddrinfo_context(host, infos):
+                        resp = self._session.get(cur, headers=cur_headers, timeout=8, stream=True, allow_redirects=False)
                     if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
                         loc = resp.headers.get("Location")
                         try:
@@ -589,9 +638,8 @@ class MovieBoxClient:
                         except:
                             pass
                         nxt = urllib.parse.urljoin(cur, loc)
-                        _assert_not_private_url(nxt)
                         cur = nxt
-                        cur_headers = req_headers  # keep original headers on redirect
+                        cur_headers = req_headers
                         continue
                     resp.raise_for_status()
                     _check_content_length(dict(resp.headers), MAX_SUBTITLE_BYTES)
@@ -606,16 +654,42 @@ class MovieBoxClient:
                 if content is None:
                     raise ScraperError("subtitle download failed: redirect loop or no content")
             else:
-                req = urllib.request.Request(url)
-                for k, v in headers:
-                    req.add_header(k, v)
-                opener = urllib.request.build_opener(_SSRFRedirectHandler)
-                with opener.open(req, timeout=8) as r:
-                    # opener already validated redirects via handler
-                    if not (200 <= r.getcode() < 300):
-                        raise ScraperError(f"status {r.getcode()}")
-                    _check_content_length(dict(r.getheaders()), MAX_SUBTITLE_BYTES)
-                    content = _read_limited_urllib(r, MAX_SUBTITLE_BYTES)
+                cur = url
+                content = None
+                for _ in range(5):
+                    host = urllib.parse.urlparse(cur).hostname
+                    if not host:
+                        raise ScraperError(f"blocked URL without host: {cur[:80]}")
+                    infos = _resolve_and_validate_host(host)
+                    with _pinned_getaddrinfo_context(host, infos):
+                        opener = urllib.request.build_opener(urllib.request.HTTPHandler, urllib.request.HTTPSHandler)
+                        req = urllib.request.Request(cur)
+                        for k, v in headers:
+                            req.add_header(k, v)
+                        try:
+                            r = opener.open(req, timeout=8)
+                        except urllib.error.HTTPError as e:
+                            if 300 <= e.code < 400:
+                                loc = e.headers.get("Location") if e.headers else None
+                                if loc:
+                                    nxt = urllib.parse.urljoin(cur, loc)
+                                    cur = nxt
+                                    continue
+                            raise ScraperError(f"status {e.code}")
+                        with r:
+                            if 300 <= r.getcode() < 400:
+                                loc = r.headers.get("Location") if hasattr(r, 'headers') else None
+                                if loc:
+                                    nxt = urllib.parse.urljoin(cur, loc)
+                                    cur = nxt
+                                    continue
+                            if not (200 <= r.getcode() < 300):
+                                raise ScraperError(f"status {r.getcode()}")
+                            _check_content_length(dict(r.getheaders()), MAX_SUBTITLE_BYTES)
+                            content = _read_limited_urllib(r, MAX_SUBTITLE_BYTES)
+                            break
+                if content is None:
+                    raise ScraperError("subtitle download failed: redirect loop or no content")
             ext = url.rsplit(".", 1)[-1].lower() if "." in url else "srt"
             if ext not in ("srt","vtt","ass","ssa","sub"):
                 ext = "srt"

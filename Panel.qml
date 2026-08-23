@@ -1355,7 +1355,7 @@ Panel {
                         // episodes — virtualized grid (handles 200-400+ episodes, internal scroll)
                         Item {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.isSeries && root.maxEp > 0 ? Math.round(140 * panel.uiScale) : 0
+                            Layout.preferredHeight: root.isSeries && root.maxEp > 0 ? Math.round(108 * panel.uiScale) : 0
                             visible: root.isSeries && root.maxEp > 0
                             clip: true
                             GridView {
@@ -1409,7 +1409,7 @@ Panel {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredHeight: 0
-                            Layout.maximumHeight: 260
+                            Layout.maximumHeight: 140
                             clip: true
                             spacing: 4
                             cacheBuffer: 200
@@ -1440,7 +1440,7 @@ Panel {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredHeight: 0
-                            Layout.maximumHeight: 90
+                            Layout.maximumHeight: 70
                             visible: root.streams.length === 0
                             Text {
                                 anchors.centerIn: parent

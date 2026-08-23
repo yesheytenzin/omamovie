@@ -1407,7 +1407,9 @@ Panel {
 
                         ListView {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(root.streams.length * 32, 260)
+                            Layout.fillHeight: true
+                            Layout.preferredHeight: 0
+                            Layout.maximumHeight: 260
                             clip: true
                             spacing: 4
                             cacheBuffer: 200
@@ -1436,7 +1438,9 @@ Panel {
                         // streams placeholder — visible when empty (loading vs no streams)
                         Item {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 90
+                            Layout.fillHeight: true
+                            Layout.preferredHeight: 0
+                            Layout.maximumHeight: 90
                             visible: root.streams.length === 0
                             Text {
                                 anchors.centerIn: parent

@@ -107,14 +107,40 @@ class _SSRFRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 def _pinned_getaddrinfo_context(host: str, validated_infos):
-    """Context manager that pins DNS for host to validated_infos during request."""
+    """Context manager that pins DNS for host to validated_infos during request.
+    Replaces port 0 from validation-time resolve with the actual requested port."""
     import socket
     orig = socket.getaddrinfo
     def _patched(h, p, family=0, type=0, proto=0, flags=0):
         if h == host:
+            # filter by family if requested
+            cands = validated_infos
             if family != 0:
-                return [i for i in validated_infos if i[0] == family]
-            return validated_infos
+                cands = [i for i in validated_infos if i[0] == family]
+                if not cands:
+                    cands = validated_infos
+            # patch port from caller's p into sockaddr
+            out = []
+            for fam, typ, pr, canon, sockaddr in cands:
+                try:
+                    if p is None:
+                        port = sockaddr[1] if len(sockaddr) > 1 else 0
+                    else:
+                        port = int(p)
+                except Exception:
+                    port = sockaddr[1] if len(sockaddr) > 1 else 0
+                # reconstruct sockaddr with correct port
+                if fam == socket.AF_INET:
+                    ip = sockaddr[0]
+                    out.append((fam, typ, pr, canon, (ip, port)))
+                elif fam == socket.AF_INET6:
+                    ip = sockaddr[0]
+                    flow = sockaddr[2] if len(sockaddr) > 2 else 0
+                    scope = sockaddr[3] if len(sockaddr) > 3 else 0
+                    out.append((fam, typ, pr, canon, (ip, port, flow, scope)))
+                else:
+                    out.append((fam, typ, pr, canon, sockaddr))
+            return out
         return orig(h, p, family, type, proto, flags)
     class _Ctx:
         def __enter__(self): socket.getaddrinfo = _patched

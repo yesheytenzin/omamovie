@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tenzin.omamovie",
   "name": "OmaMovie",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "author": "tenzin",
   "description": "Stream movies and TV shows directly from your Omarchy bar. Search content, select episodes, choose quality, and play instantly in mpv.",
   "kinds": [

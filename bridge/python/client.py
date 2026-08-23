@@ -42,6 +42,66 @@ def _check_content_length(headers, limit: int):
     except Exception:
         pass
 
+def _is_private_url(url: str) -> bool:
+    """Return True if URL resolves to loopback/private/link-local (SSRF)."""
+    try:
+        host = urllib.parse.urlparse(url).hostname
+        if not host:
+            return True  # reject URLs without host
+        # block non-http(s) already handled elsewhere, but be safe
+        scheme = urllib.parse.urlparse(url).scheme.lower()
+        if scheme not in ("http", "https"):
+            return True
+        # try literal IP first
+        try:
+            import ipaddress
+            ip = ipaddress.ip_address(host)
+            return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+        except ValueError:
+            pass
+        # DNS lookup with short timeout guard
+        import socket
+        # Use getaddrinfo; limit to 2s via setdefaulttimeout wrapper
+        old_to = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(2)
+            infos = socket.getaddrinfo(host, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+        finally:
+            socket.setdefaulttimeout(old_to)
+        if not infos:
+            return True
+        import ipaddress
+        for fam, _, _, _, sockaddr in infos:
+            ip_str = sockaddr[0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                    return True
+            except ValueError:
+                continue
+        return False
+    except Exception:
+        return True  # fail closed on parse/DNS error for poster/subtitle
+
+def _assert_not_private_url(url: str):
+    if _is_private_url(url):
+        raise ScraperError(f"blocked private/loopback URL: {url[:80]}")
+
+class _SSRFRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # newurl may be relative
+        if newurl:
+            # urljoin with original
+            try:
+                base = req.full_url
+                joined = urllib.parse.urljoin(base, newurl)
+                _assert_not_private_url(joined)
+            except ScraperError:
+                raise
+            except Exception:
+                raise ScraperError(f"blocked redirect to {newurl[:80]}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
 def _read_limited_requests(resp, limit: int) -> bytes:
     # stream already, read chunked with limit
     chunks = []
@@ -462,27 +522,44 @@ class MovieBoxClient:
 
     def fetch_poster_bytes(self, url: str):
         try:
+            _assert_not_private_url(url)
             if self._use_requests:
                 assert self._session is not None
-                resp = self._session.get(url, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8, stream=True)
-                if not (200 <= resp.status_code < 300):
+                # manual redirect handling with SSRF checks
+                cur = url
+                for _ in range(5):
+                    resp = self._session.get(cur, headers={"User-Agent": "MovieBox-Tui/1.0"}, timeout=8, stream=True, allow_redirects=False)
+                    if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
+                        loc = resp.headers.get("Location")
+                        try:
+                            resp.close()
+                        except:
+                            pass
+                        nxt = urllib.parse.urljoin(cur, loc)
+                        _assert_not_private_url(nxt)
+                        cur = nxt
+                        continue
+                    if not (200 <= resp.status_code < 300):
+                        try:
+                            resp.close()
+                        except:
+                            pass
+                        return None
                     try:
-                        resp.close()
-                    except:
-                        pass
-                    return None
-                try:
-                    _check_content_length(dict(resp.headers), MAX_POSTER_BYTES)
-                    data = _read_limited_requests(resp, MAX_POSTER_BYTES)
-                finally:
-                    try:
-                        resp.close()
-                    except:
-                        pass
-                return data
+                        _check_content_length(dict(resp.headers), MAX_POSTER_BYTES)
+                        data = _read_limited_requests(resp, MAX_POSTER_BYTES)
+                    finally:
+                        try:
+                            resp.close()
+                        except:
+                            pass
+                    return data
+                return None
             else:
+                # urllib with SSRF-aware redirect handler
+                opener = urllib.request.build_opener(_SSRFRedirectHandler)
                 req = urllib.request.Request(url, headers={"User-Agent": "MovieBox-Tui/1.0"})
-                with urllib.request.urlopen(req, timeout=8) as r:
+                with opener.open(req, timeout=8) as r:
                     if not (200 <= r.getcode() < 300):
                         return None
                     _check_content_length(dict(r.getheaders()), MAX_POSTER_BYTES)
@@ -493,27 +570,48 @@ class MovieBoxClient:
             return None
 
     def download_subtitle_file(self, url: str, headers: list[tuple[str,str]]):
-        # limit 8s + byte cap
+        # limit 8s + byte cap + SSRF check
         try:
+            _assert_not_private_url(url)
             if self._use_requests:
                 assert self._session is not None
                 import requests
                 req_headers = {k: v for k, v in headers} if headers else {}
-                resp = self._session.get(url, headers=req_headers, timeout=8, stream=True)
-                resp.raise_for_status()
-                _check_content_length(dict(resp.headers), MAX_SUBTITLE_BYTES)
-                try:
-                    content = _read_limited_requests(resp, MAX_SUBTITLE_BYTES)
-                finally:
+                cur = url
+                cur_headers = req_headers
+                content = None
+                for _ in range(5):
+                    resp = self._session.get(cur, headers=cur_headers, timeout=8, stream=True, allow_redirects=False)
+                    if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
+                        loc = resp.headers.get("Location")
+                        try:
+                            resp.close()
+                        except:
+                            pass
+                        nxt = urllib.parse.urljoin(cur, loc)
+                        _assert_not_private_url(nxt)
+                        cur = nxt
+                        cur_headers = req_headers  # keep original headers on redirect
+                        continue
+                    resp.raise_for_status()
+                    _check_content_length(dict(resp.headers), MAX_SUBTITLE_BYTES)
                     try:
-                        resp.close()
-                    except:
-                        pass
+                        content = _read_limited_requests(resp, MAX_SUBTITLE_BYTES)
+                    finally:
+                        try:
+                            resp.close()
+                        except:
+                            pass
+                    break
+                if content is None:
+                    raise ScraperError("subtitle download failed: redirect loop or no content")
             else:
                 req = urllib.request.Request(url)
                 for k, v in headers:
                     req.add_header(k, v)
-                with urllib.request.urlopen(req, timeout=8) as r:
+                opener = urllib.request.build_opener(_SSRFRedirectHandler)
+                with opener.open(req, timeout=8) as r:
+                    # opener already validated redirects via handler
                     if not (200 <= r.getcode() < 300):
                         raise ScraperError(f"status {r.getcode()}")
                     _check_content_length(dict(r.getheaders()), MAX_SUBTITLE_BYTES)

@@ -2,6 +2,8 @@
 
 > **Credit:** [MovieBox-TUI](https://github.com/mesamirh/MovieBox-Tui) by [mesamirh](https://github.com/mesamirh) — ported to Python backend (`bridge/python/`).
 
+![OmaMovie preview](preview.png)
+
 Quickshell panel for movies, shows & anime — search, pick season/episode and stream in `mpv`.
 
 - **No Rust, no binary downloads** — pure Python, `~1.8M` clone (was `~231M` before history purge)
